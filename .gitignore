@@ -1,0 +1,32 @@
+# Secrets
+tmb_credentials.txt
+.env
+.env.*
+
+# Supabase local
+.supabase/
+supabase/.temp/
+
+# Logs
+*.log
+
+# macOS
+.DS_Store
+
+# VSCode local
+.vscode/settings.json
+
+# Generated local snapshots
+imetro.json
+imetro-data.js
+
+# Dependencies
+node_modules/
+
+# Build
+dist/
+build/
+
+# Materials pesats
+mapa-metro-barcelona-2026-big.pdf
+mapa-metro-barcelona-2026-big.png

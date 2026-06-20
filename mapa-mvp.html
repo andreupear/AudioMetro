@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AudioMetro — Mapa + so (gest neurona)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<style>
+  :root{--bg:#070910;--panel:#121622;--ink:#e8ecf4;--muted:#8a93a6;--accent:#5ad1c4;--line:#222838}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{padding:18px 22px 6px}
+  h1{font-size:17px;margin:0;font-weight:600}
+  .sub{color:var(--muted);font-size:12.5px;max-width:760px;margin-top:2px}
+  .wrap{display:grid;grid-template-columns:300px 1fr;gap:16px;padding:14px 22px 32px}
+  @media(max-width:860px){.wrap{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px}
+  .panel h2{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 11px;font-weight:600}
+  .row{margin:13px 0}
+  label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px}
+  .val{color:var(--ink);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .start{width:100%;padding:13px;border-radius:10px;border:0;cursor:pointer;background:var(--accent);color:#06201d;font-weight:700;font-size:14px}
+  .start.stop{background:#e0566a;color:#fff}
+  .lines{display:flex;flex-direction:column;gap:3px}
+  .ln{display:flex;align-items:center;gap:9px;padding:5px 7px;border-radius:7px;cursor:pointer;user-select:none}
+  .ln:hover{background:#1b2030}
+  .ln .sw{width:13px;height:13px;border-radius:3px}
+  .ln .nm{width:38px;font-weight:700;font-size:12.5px}
+  .ln .meta{color:var(--muted);font-size:11px;flex:1}
+  .ln.off{opacity:.32}
+  .stage{position:relative;background:radial-gradient(1200px 600px at 55% 40%,#0c1018,#070910);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  svg{width:100%;display:block}
+  .meters{display:flex;gap:16px;padding:10px 14px;border-top:1px solid var(--line);flex-wrap:wrap}
+  .meter .big{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+  .meter .lbl{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .note{font-size:11px;color:var(--muted);margin-top:9px;line-height:1.45}
+  kbd{background:#1b2030;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
+  .badge{display:inline-block;background:#1b2030;border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:11px;color:var(--accent);font-weight:600}
+</style>
+</head>
+<body>
+<header>
+  <h1>AudioMetro · mapa + so</h1>
+  <div class="sub">Cada arribada encén una estació (<span class="badge">gest neurona</span>) i sona alhora.
+  Les línies són oscil·ladors a la seva freqüència de pas; les coincidències es reforcen.
+  <b>Dades de xarxa: aproximació curada</b> (noms i ordre reals, colors oficials, coordenades estimades) — substituïbles per les reals amb <kbd>fetch-network.mjs</kbd>.</div>
+</header>
+
+<div class="wrap">
+  <div>
+    <div class="panel">
+      <h2>So</h2>
+      <button id="power" class="start">▶ Activa l'àudio</button>
+      <div class="row"><label>Volum · <span class="val" id="volV">−9 dB</span></label>
+        <input id="vol" type="range" min="-40" max="0" value="-9" /></div>
+    </div>
+    <div class="panel" style="margin-top:13px">
+      <h2>Sistema</h2>
+      <div class="row"><label>Compressió temporal · <span class="val" id="compV">25×</span></label>
+        <input id="comp" type="range" min="6" max="60" value="25" /></div>
+      <div class="row"><label>Acoblament K · <span class="val" id="kV">0.00</span></label>
+        <input id="k" type="range" min="0" max="2.5" value="0" step="0.05" /></div>
+      <div class="row"><label>Reforç de sincronia · <span class="val" id="syncV">mitjà</span></label>
+        <input id="sync" type="range" min="0" max="2" value="1" step="0.01" /></div>
+      <div class="note">Prova: <kbd>K=0</kbd> + deixa només dues línies → escolta i mira el batec de fase.
+      Apuja <kbd>K</kbd> i sentiràs com es sincronitzen.</div>
+    </div>
+    <div class="panel" style="margin-top:13px">
+      <h2>Línies</h2>
+      <div class="lines" id="lines"></div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <svg id="map" viewBox="0 0 1000 820" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="meters">
+      <div class="meter"><div class="big" id="coh">0.00</div><div class="lbl">Coherència r</div></div>
+      <div class="meter"><div class="big" id="eps">0</div><div class="lbl">Impulsos / s</div></div>
+      <div class="meter"><div class="big" id="nst">0</div><div class="lbl">Estacions</div></div>
+      <div class="meter"><div class="big" id="voices">0</div><div class="lbl">Veus actives</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ════════════ AudioMetro · MVP mapa + so ════════════
+   Gest sonor: NEURONA (decisió tancada).
+   Una sola font de dades (la xarxa) alimenta visual + so + scheduler.
+*/
+
+/* ---------- escala fixa (A menor pentatònica) ---------- */
+const PC={C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
+const nf=(n,o)=>440*Math.pow(2,(((o+1)*12+PC[n])-69)/12);
+
+/* ---------- DEFINICIÓ DE LA XARXA (curada) ----------
+   stations: noms i ordre reals. note: registre de la línia. */
+const LINES_DEF=[
+ {id:'L1',color:'#E1251B',auto:false,head:210,jitter:0.10,note:nf('A',2),stations:[
+   'Hospital de Bellvitge','Bellvitge','Avinguda Carrilet','Rambla Just Oliveras','Can Serra','Florida',
+   'Torrassa','Santa Eulàlia','Mercat Nou','Plaça de Sants','Hostafrancs','Espanya','Rocafort','Urgell',
+   'Universitat','Catalunya','Urquinaona','Arc de Triomf','Marina','Glòries','Clot','Navas','La Sagrera',
+   'Fabra i Puig','Sant Andreu','Torras i Bages','Trinitat Vella','Baró de Viver','Santa Coloma','Fondo']},
+ {id:'L2',color:'#9B3894',auto:false,head:240,jitter:0.10,note:nf('C',3),stations:[
+   'Paral·lel','Sant Antoni','Universitat','Passeig de Gràcia','Tetuan','Monumental','Sagrada Família',
+   'Encants','Clot','Bac de Roda','Sant Martí','La Pau','Verneda','Artigues | Sant Adrià','Sant Roc',
+   'Gorg','Pep Ventura','Badalona Pompeu Fabra']},
+ {id:'L3',color:'#00A94F',auto:false,head:180,jitter:0.09,note:nf('D',3),stations:[
+   'Zona Universitària','Palau Reial','Maria Cristina','Les Corts','Plaça del Centre','Sants Estació',
+   'Tarragona','Espanya','Poble Sec','Paral·lel','Drassanes','Liceu','Catalunya','Passeig de Gràcia',
+   'Diagonal','Fontana','Lesseps','Vallcarca','Penitents','Vall d\'Hebron','Montbau','Mundet','Valldaura',
+   'Canyelles','Roquetes','Trinitat Nova']},
+ {id:'L4',color:'#FFD400',auto:false,head:255,jitter:0.11,note:nf('E',3),stations:[
+   'Trinitat Nova','Via Júlia','Llucmajor','Maragall','Guinardó | Hospital de Sant Pau','Alfons X',
+   'Joanic','Verdaguer','Girona','Passeig de Gràcia','Urquinaona','Jaume I','Barceloneta',
+   'Ciutadella | Vila Olímpica','Bogatell','Llacuna','Poblenou','Selva de Mar','El Maresme | Fòrum',
+   'Besòs Mar','Besòs']},
+ {id:'L5',color:'#0072BC',auto:false,head:195,jitter:0.08,note:nf('G',3),stations:[
+   'Cornellà Centre','Gavarra','Sant Ildefons','Can Boixeres','Can Vidalet','Pubilla Cases','Collblanc',
+   'Badal','Plaça de Sants','Sants Estació','Entença','Hospital Clínic','Diagonal','Verdaguer',
+   'Sagrada Família','Sant Pau | Dos de Maig','Camp de l\'Arpa','La Sagrera','Congrés','Maragall',
+   'Virrei Amat','Vilapicina','Horta','El Carmel','El Coll | La Teixonera','Vall d\'Hebron']},
+ {id:'L9',color:'#F58220',auto:true,head:300,jitter:0.02,note:nf('A',3),stations:[
+   'Aeroport T1','Aeroport T2','Mas Blau','Parc Nou','Cèntric','El Prat Estació','Les Moreres',
+   'Mercabarna','Parc Logístic','Fira','Europa | Fira','Can Tries | Gornal','Torrassa']},
+ {id:'L11',color:'#9BCB3C',auto:true,head:600,jitter:0.02,note:nf('C',4),stations:[
+   'Trinitat Nova','Casa de l\'Aigua','Torre Baró | Vallbona','Ciutat Meridiana','Can Cuiàs']},
+];
+
+/* coordenades ancora (lat,lon) aproximades; la resta s'interpola */
+const ANCHORS={
+ 'Hospital de Bellvitge':[41.351,2.107],'Torrassa':[41.366,2.119],'Plaça de Sants':[41.375,2.133],
+ 'Espanya':[41.375,2.149],'Universitat':[41.386,2.164],'Catalunya':[41.387,2.170],
+ 'Urquinaona':[41.389,2.174],'Arc de Triomf':[41.391,2.181],'Glòries':[41.404,2.183],
+ 'Clot':[41.410,2.187],'La Sagrera':[41.420,2.187],'Sant Andreu':[41.435,2.190],
+ 'Trinitat Vella':[41.447,2.196],'Santa Coloma':[41.451,2.208],'Fondo':[41.452,2.218],
+ 'Paral·lel':[41.375,2.169],'Sant Antoni':[41.379,2.164],'Passeig de Gràcia':[41.392,2.165],
+ 'Sagrada Família':[41.404,2.174],'Gorg':[41.444,2.231],'Badalona Pompeu Fabra':[41.449,2.247],
+ 'Zona Universitària':[41.383,2.114],'Sants Estació':[41.379,2.140],'Diagonal':[41.397,2.162],
+ 'Vall d\'Hebron':[41.426,2.148],'Trinitat Nova':[41.444,2.182],'Verdaguer':[41.400,2.170],
+ 'Girona':[41.399,2.165],'Besòs':[41.417,2.222],'El Maresme | Fòrum':[41.410,2.216],
+ 'Maragall':[41.425,2.176],'Cornellà Centre':[41.378,2.071],'Collblanc':[41.371,2.123],
+ 'Horta':[41.428,2.158],'Aeroport T1':[41.287,2.075],'Aeroport T2':[41.303,2.078],
+ 'El Prat Estació':[41.327,2.099],'Can Tries | Gornal':[41.363,2.116],'Can Cuiàs':[41.462,2.176],
+ 'Jaume I':[41.383,2.178],'Barceloneta':[41.381,2.185],'Ciutadella | Vila Olímpica':[41.385,2.190],
+ 'Liceu':[41.380,2.173],'Drassanes':[41.376,2.175],'Monumental':[41.399,2.181],
+ 'Fabra i Puig':[41.430,2.188],'Llucmajor':[41.438,2.179],'Virrei Amat':[41.430,2.177],
+};
+
+/* ---------- construcció de la xarxa ---------- */
+const STA={};
+function build(){
+  for(const L of LINES_DEF){
+    const names=L.stations, n=names.length, co=new Array(n);
+    const idx=[]; names.forEach((nm,i)=>{ if(ANCHORS[nm]){ co[i]={lat:ANCHORS[nm][0],lon:ANCHORS[nm][1]}; idx.push(i);} });
+    for(let k=0;k<idx.length-1;k++){const a=idx[k],b=idx[k+1],A=co[a],B=co[b];
+      for(let i=a+1;i<b;i++){const f=(i-a)/(b-a);co[i]={lat:A.lat+(B.lat-A.lat)*f,lon:A.lon+(B.lon-A.lon)*f};}}
+    if(idx.length>=2){const a0=idx[0],a1=idx[1],A=co[a0],B=co[a1];
+      for(let i=0;i<a0;i++){const f=(i-a0)/(a1-a0);co[i]={lat:A.lat+(B.lat-A.lat)*f,lon:A.lon+(B.lon-A.lon)*f};}
+      const z0=idx[idx.length-1],z1=idx[idx.length-2],Z0=co[z0],Z1=co[z1];
+      for(let i=z0+1;i<n;i++){const f=(i-z0)/(z0-z1);co[i]={lat:Z0.lat+(Z0.lat-Z1.lat)*f,lon:Z0.lon+(Z0.lon-Z1.lon)*f};}}
+    L.seq=[]; L.cur=0; L.theta=Math.random()*2*Math.PI; L.on=true;
+    names.forEach((nm,i)=>{
+      let s=STA[nm];
+      if(!s){s={name:nm,lat:co[i].lat,lon:co[i].lon,lines:[]};STA[nm]=s;}
+      if(!s.lines.includes(L.id))s.lines.push(L.id);
+      L.seq.push(s);
+    });
+  }
+  Object.values(STA).forEach(s=>s.inter=s.lines.length>1);
+  // projecció a viewBox
+  const all=Object.values(STA),M=46,W=1000,H=820;
+  const la=all.map(s=>s.lat),lo=all.map(s=>s.lon);
+  const minLa=Math.min(...la),maxLa=Math.max(...la),minLo=Math.min(...lo),maxLo=Math.max(...lo);
+  for(const s of all){
+    s.x=M+(W-2*M)*((s.lon-minLo)/(maxLo-minLo));
+    s.y=M+(H-2*M)*((maxLa-s.lat)/(maxLa-minLa));
+    s.pan=Math.max(-1,Math.min(1,((s.x-M)/(W-2*M))*2-1));
+    s.flash=0;
+  }
+}
+build();
+
+/* ---------- render SVG ---------- */
+const svg=document.getElementById('map');
+const SVGNS='http://www.w3.org/2000/svg';
+function el(t,a){const e=document.createElementNS(SVGNS,t);for(const k in a)e.setAttribute(k,a[k]);return e;}
+function render(){
+  // línies (sota)
+  for(const L of LINES_DEF){
+    const d='M'+L.seq.map(s=>`${s.x.toFixed(1)} ${s.y.toFixed(1)}`).join(' L ');
+    const p=el('path',{d,fill:'none',stroke:L.color,'stroke-width':3.4,'stroke-linejoin':'round',
+      'stroke-linecap':'round','stroke-opacity':0.55}); p.dataset.line=L.id; L.pathEl=p; svg.appendChild(p);
+  }
+  // estacions (sobre)
+  for(const s of Object.values(STA)){
+    const r=s.inter?5.5:3.4;
+    s.halo=el('circle',{cx:s.x,cy:s.y,r:r,fill:'#fff','fill-opacity':0}); svg.appendChild(s.halo);
+    const c=el('circle',{cx:s.x,cy:s.y,r:r,fill:s.inter?'#0a0c12':'#0d1018',
+      stroke:s.inter?'#fff':lineColorOf(s),'stroke-width':s.inter?2:1.6}); s.core=c; svg.appendChild(c);
+  }
+  document.getElementById('nst').textContent=Object.keys(STA).length;
+}
+function lineColorOf(s){const L=LINES_DEF.find(l=>l.id===s.lines[0]);return L?L.color:'#888';}
+render();
+
+/* ---------- cadena d'àudio ---------- */
+let bus,reverb,masterFilter,masterVol,limiter,ready=false;
+function master(){
+  limiter=new Tone.Limiter(-2).toDestination();
+  masterVol=new Tone.Gain(Tone.dbToGain(-9)).connect(limiter);
+  masterFilter=new Tone.Filter(6000,'lowpass').connect(masterVol);
+  reverb=new Tone.Reverb({decay:5.5,wet:0.32,preDelay:0.02}).connect(masterFilter);
+  bus=new Tone.Gain(0.9).connect(reverb); ready=true;
+}
+
+/* ---------- gest NEURONA (únic) ---------- */
+let activeVoices=0; const MAX=56;
+function neuron(time,freq,pan,gain,hub){
+  if(activeVoices>=MAX)return; activeVoices++;
+  const p=new Tone.Panner(pan).connect(bus);
+  const amp=new Tone.Gain(0).connect(p);
+  const osc=new Tone.Oscillator(freq*0.5,hub?'sine':'triangle').connect(amp);
+  const tail=hub?1.9:0.95;
+  osc.frequency.setValueAtTime(freq*0.5,time);
+  osc.frequency.exponentialRampToValueAtTime(freq,time+0.055);
+  amp.gain.setValueAtTime(0,time);
+  amp.gain.linearRampToValueAtTime(gain,time+0.006);
+  amp.gain.exponentialRampToValueAtTime(0.0001,time+tail);
+  osc.start(time);osc.stop(time+tail+0.05);
+  setTimeout(()=>{try{osc.dispose();amp.dispose();p.dispose();}catch(e){}activeVoices--;},
+    Math.max(0,(time-Tone.now())+tail+0.3)*1000);
+}
+function accent(time,freq,gain){
+  const amp=new Tone.Gain(0).connect(bus);
+  const osc=new Tone.Oscillator(freq/2,'sine').connect(amp);
+  amp.gain.setValueAtTime(0,time);amp.gain.linearRampToValueAtTime(gain,time+0.004);
+  amp.gain.exponentialRampToValueAtTime(0.0001,time+0.5);
+  osc.start(time);osc.stop(time+0.55);
+  setTimeout(()=>{try{osc.dispose();amp.dispose();}catch(e){}},900);
+}
+
+/* ---------- arribada ---------- */
+let lastEmit=[],emitCount=0,syncAmt=1;
+function emit(L,time){
+  const s=L.seq[L.cur]; L.cur=(L.cur+1)%L.seq.length;
+  const hub=s.inter, freq=L.note*(hub?0.5:1); let gain=hub?0.8:0.5;
+  const COINC=0.07*(25/comp); let reinf=false;
+  for(const e of lastEmit){if(time-e<COINC){reinf=true;break;}}
+  lastEmit.push(time); if(lastEmit.length>24)lastEmit.shift();
+  if(reinf){gain*=1+0.6*syncAmt; if(syncAmt>0.05)accent(time,L.note,0.28*syncAmt);}
+  // SO + VISUAL sincronitzats
+  neuron(time,freq,s.pan,gain,hub);
+  const delay=Math.max(0,(time-Tone.now())*1000);
+  setTimeout(()=>{ s.flash=Math.max(s.flash,reinf?1.4:1); },delay);
+  emitCount++;
+}
+
+/* ---------- nucli Kuramoto ---------- */
+let comp=25,K=0,r=0,psi=0,lastT=0,running=false;
+const omega=L=>2*Math.PI/(L.head/comp);
+function order(){let x=0,y=0,n=0;for(const L of LINES_DEF){if(!L.on)continue;x+=Math.cos(L.theta);y+=Math.sin(L.theta);n++;}
+  if(!n){r=0;return;}x/=n;y/=n;r=Math.hypot(x,y);psi=Math.atan2(y,x);}
+function step(now){
+  const dt=Math.min(0.05,(now-lastT)/1000)||0; lastT=now;
+  if(ready&&running){
+    order();
+    for(const L of LINES_DEF){ if(!L.on)continue;
+      const w=omega(L),noise=(Math.random()*2-1)*L.jitter*w;
+      const dth=(w+K*r*Math.sin(psi-L.theta)+noise)*dt, prev=L.theta; L.theta+=dth;
+      if(L.theta>=2*Math.PI){L.theta-=2*Math.PI;
+        const frac=(2*Math.PI-prev)/Math.max(1e-6,dth);
+        emit(L,Tone.now()+0.03+(1-frac)*dt);}
+    }
+    if(masterFilter)masterFilter.frequency.rampTo(1600+9000*r,0.3);
+    if(reverb)reverb.wet.rampTo(0.18+0.22*(1-r),0.5);
+  }
+  // animació dels nodes (flash neurona)
+  for(const s of Object.values(STA)){
+    if(s.flash>0.01){
+      const base=s.inter?5.5:3.4, f=s.flash;
+      s.halo.setAttribute('r',base+f*16);
+      s.halo.setAttribute('fill-opacity',(0.5*f).toFixed(3));
+      s.core.setAttribute('r',(base+f*3).toFixed(2));
+      s.core.setAttribute('fill', f>0.5? '#fff' : (s.inter?'#0a0c12':'#0d1018'));
+      s.flash*=0.90; if(s.flash<0.01){s.flash=0;s.halo.setAttribute('fill-opacity',0);s.core.setAttribute('r',base);
+        s.core.setAttribute('fill',s.inter?'#0a0c12':'#0d1018');}
+    }
+  }
+  document.getElementById('coh').textContent=r.toFixed(2);
+  document.getElementById('voices').textContent=activeVoices;
+  requestAnimationFrame(step);
+}
+setInterval(()=>{document.getElementById('eps').textContent=emitCount;emitCount=0;},1000);
+
+/* ---------- UI ---------- */
+const power=document.getElementById('power');
+power.onclick=async()=>{
+  if(!running){ await Tone.start(); if(!ready)master(); running=true; lastT=performance.now();
+    power.textContent='■ Atura'; power.classList.add('stop'); }
+  else{ running=false; power.textContent='▶ Activa l\'àudio'; power.classList.remove('stop'); }
+};
+const bind=(id,fn,fmt)=>{const e=document.getElementById(id);
+  e.oninput=()=>{fn(parseFloat(e.value)); if(fmt)document.getElementById(id+'V').textContent=fmt(e.value);};};
+bind('vol',v=>{if(masterVol)masterVol.gain.rampTo(Tone.dbToGain(v),0.1);},v=>`${v} dB`);
+bind('comp',v=>{comp=v;},v=>`${v}×`);
+bind('k',v=>{K=v;},v=>(+v).toFixed(2));
+bind('sync',v=>{syncAmt=v;},v=>{const n=+v;return n<0.66?'baix':n<1.33?'mitjà':'alt';});
+
+const lc=document.getElementById('lines');
+LINES_DEF.forEach(L=>{
+  const d=document.createElement('div'); d.className='ln';
+  d.innerHTML=`<span class="sw" style="background:${L.color}"></span>
+    <span class="nm" style="color:${L.color}">${L.id}</span>
+    <span class="meta">${L.seq.length} est · ${L.auto?'automàtica':'manual'}</span>`;
+  d.onclick=()=>{L.on=!L.on; d.classList.toggle('off',!L.on);
+    if(L.pathEl)L.pathEl.setAttribute('stroke-opacity',L.on?0.55:0.12);};
+  lc.appendChild(d);
+});
+
+requestAnimationFrame(step);
+</script>
+</body>
+</html>

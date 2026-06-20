@@ -1,0 +1,1827 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AudioMetro — xarxa real + so</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<style>
+  :root{--bg:#070910;--panel:#121622;--ink:#e8ecf4;--muted:#8a93a6;--accent:#5ad1c4;--line:#222838}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{padding:18px 22px 6px}
+  h1{font-size:17px;margin:0;font-weight:600}
+  .sub{color:var(--muted);font-size:12.5px;max-width:780px;margin-top:2px}
+  .wrap{display:grid;grid-template-columns:300px 1fr;gap:16px;padding:14px 22px 32px}
+  @media(max-width:880px){.wrap{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px}
+  .panel h2{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 11px;font-weight:600}
+  .row{margin:13px 0}
+  label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px}
+  .val{color:var(--ink);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .start{width:100%;padding:13px;border-radius:10px;border:0;cursor:pointer;background:var(--accent);color:#06201d;font-weight:700;font-size:14px}
+  .start.stop{background:#e0566a;color:#fff}
+  .lines{display:flex;flex-direction:column;gap:3px}
+  .ln{display:flex;align-items:center;gap:9px;padding:5px 7px;border-radius:7px;cursor:pointer;user-select:none}
+  .ln:hover{background:#1b2030}
+  .ln .sw{width:13px;height:13px;border-radius:3px;flex:0 0 auto}
+  .ln .nm{width:42px;font-weight:700;font-size:12px}
+  .ln .meta{color:var(--muted);font-size:11px;flex:1}
+  .ln.off{opacity:.32}
+  .stage{position:relative;background:radial-gradient(1100px 700px at 52% 38%,#0c1018,#070910);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  svg{width:100%;display:block}
+  .meters{display:flex;gap:16px;padding:10px 14px;border-top:1px solid var(--line);flex-wrap:wrap}
+  .meter .big{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+  .meter .lbl{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .note{font-size:11px;color:var(--muted);margin-top:9px;line-height:1.45}
+  kbd{background:#1b2030;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
+  .badge{display:inline-block;background:#1b2030;border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:11px;color:var(--accent);font-weight:600}
+  .src{font-size:10.5px;color:#586074;padding:0 22px 18px}
+</style>
+</head>
+<body>
+<header>
+  <h1>AudioMetro · xarxa real + so</h1>
+  <div class="sub">Renderitzat directament des de <kbd>network.json</kbd> (dades reals de TMB).
+  Cada arribada encén la seva estació (<span class="badge">flash neurona</span> + ona) i sona alhora.
+  Línies = oscil·ladors a la seva freqüència de pas; les coincidències es reforcen. Dades simulades de circulació.</div>
+</header>
+
+<div class="wrap">
+  <div>
+    <div class="panel">
+      <h2>So</h2>
+      <button id="power" class="start">▶ Activa l'àudio</button>
+      <div class="row"><label>Volum · <span class="val" id="volV">−9 dB</span></label>
+        <input id="vol" type="range" min="-40" max="0" value="-9" /></div>
+    </div>
+    <div class="panel" style="margin-top:13px">
+      <h2>Sistema</h2>
+      <div class="row"><label>Compressió temporal · <span class="val" id="compV">25×</span></label>
+        <input id="comp" type="range" min="6" max="60" value="25" /></div>
+      <div class="row"><label>Acoblament K · <span class="val" id="kV">0.00</span></label>
+        <input id="k" type="range" min="0" max="2.5" value="0" step="0.05" /></div>
+      <div class="row"><label>Reforç de sincronia · <span class="val" id="syncV">mitjà</span></label>
+        <input id="sync" type="range" min="0" max="2" value="1" step="0.01" /></div>
+      <div class="note">Prova: <kbd>K=0</kbd> + deixa només dues línies → mira i escolta el batec de fase.
+      Apuja <kbd>K</kbd> i es sincronitzen.</div>
+    </div>
+    <div class="panel" style="margin-top:13px">
+      <h2>Línies</h2>
+      <div class="lines" id="lines"></div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <svg id="map" viewBox="0 0 1000 900" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="meters">
+      <div class="meter"><div class="big" id="coh">0.00</div><div class="lbl">Coherència r</div></div>
+      <div class="meter"><div class="big" id="eps">0</div><div class="lbl">Impulsos / s</div></div>
+      <div class="meter"><div class="big" id="nst">0</div><div class="lbl">Estacions</div></div>
+      <div class="meter"><div class="big" id="voices">0</div><div class="lbl">Veus actives</div></div>
+    </div>
+  </div>
+</div>
+<div class="src" id="srcline"></div>
+
+<script>
+/* ════════════ AudioMetro · xarxa real + so ════════════
+   Gest sonor: NEURONA (tancat). Font de dades: network.json (TMB).
+   Les dades s'incrusten (per funcionar en file://) però si se serveix per web,
+   intenta primer fetch('network.json') per agafar la versió més fresca. */
+const NET_EMBED = {
+  "generatAt": 1781890315394,
+  "lines": [
+    {
+      "id": "L1",
+      "color": "#CE1126",
+      "stations": [
+        "Can Serra",
+        "Rocafort",
+        "Arc de Triomf",
+        "Torras i Bages",
+        "Hostafrancs",
+        "Bellvitge",
+        "Florida",
+        "Santa Eulàlia",
+        "Urgell",
+        "Espanya",
+        "Urquinaona",
+        "Glòries",
+        "Fabra i Puig",
+        "Clot",
+        "Santa Coloma",
+        "Hospital de Bellvitge",
+        "Rambla Just Oliveras",
+        "Torrassa",
+        "Universitat",
+        "Marina",
+        "La Sagrera",
+        "Baró de Viver",
+        "Plaça de Sants",
+        "Mercat Nou",
+        "Fondo",
+        "Av. Carrilet",
+        "Trinitat Vella",
+        "Sant Andreu",
+        "Navas",
+        "Catalunya"
+      ]
+    },
+    {
+      "id": "L10S",
+      "color": "#00A6D6",
+      "stations": [
+        "Ciutat de la Justícia",
+        "ZAL | Riu Vell",
+        "Port Comercial | La Factoria",
+        "Zona Franca",
+        "Foc",
+        "Foneria",
+        "Provençana",
+        "Can Tries | Gornal",
+        "Torrassa",
+        "Collblanc",
+        "Ecoparc"
+      ]
+    },
+    {
+      "id": "FM",
+      "color": "#004C38",
+      "stations": [
+        "Parc de Montjuïc",
+        "Paral·lel"
+      ]
+    },
+    {
+      "id": "L3",
+      "color": "#1EB53A",
+      "stations": [
+        "Penitents",
+        "Tarragona",
+        "Maria Cristina",
+        "Les Corts",
+        "Zona Universitària",
+        "Sants Estació",
+        "Espanya",
+        "Mundet",
+        "Canyelles",
+        "Trinitat Nova",
+        "Poble Sec",
+        "Liceu",
+        "Catalunya",
+        "Drassanes",
+        "Fontana",
+        "Vallcarca",
+        "Paral·lel",
+        "Lesseps",
+        "Montbau",
+        "Palau Reial",
+        "Valldaura",
+        "Plaça del Centre",
+        "Passeig de Gràcia",
+        "Roquetes",
+        "Vall d'Hebron",
+        "Diagonal"
+      ]
+    },
+    {
+      "id": "L5",
+      "color": "#005A97",
+      "stations": [
+        "Congrés",
+        "Cornellà Centre",
+        "Hospital Clínic",
+        "El Carmel",
+        "Ernest Lluch",
+        "Gavarra",
+        "Sant Ildefons",
+        "Can Boixeres",
+        "Can Vidalet",
+        "Pubilla Cases",
+        "Collblanc",
+        "Badal",
+        "Plaça de Sants",
+        "Sants Estació",
+        "Entença",
+        "Diagonal",
+        "Verdaguer",
+        "Sagrada Família",
+        "Sant Pau | Dos de Maig",
+        "Camp de l'Arpa",
+        "La Sagrera",
+        "Maragall",
+        "Virrei Amat",
+        "Vilapicina",
+        "Horta",
+        "El Coll | La Teixonera",
+        "Vall d'Hebron"
+      ]
+    },
+    {
+      "id": "L4",
+      "color": "#F7A30E",
+      "stations": [
+        "Llacuna",
+        "Besòs",
+        "La Pau",
+        "Passeig de Gràcia",
+        "Maragall",
+        "El Maresme | Fòrum",
+        "Barceloneta",
+        "Girona",
+        "Joanic",
+        "Poblenou",
+        "Verdaguer",
+        "Selva de Mar",
+        "Bogatell",
+        "Jaume I",
+        "Urquinaona",
+        "Alfons X",
+        "Llucmajor",
+        "Trinitat Nova",
+        "Besòs Mar",
+        "Via Júlia",
+        "Ciutadella | Vila Olímpica",
+        "Guinardó | Hospital de Sant Pau"
+      ]
+    },
+    {
+      "id": "L2",
+      "color": "#93248F",
+      "stations": [
+        "La Pau",
+        "Tetuan",
+        "Monumental",
+        "Clot",
+        "Sant Martí",
+        "Gorg",
+        "Sagrada Família",
+        "Badalona Pompeu Fabra",
+        "Passeig de Gràcia",
+        "Encants",
+        "Sant Roc",
+        "Pep Ventura",
+        "Sant Antoni",
+        "Universitat",
+        "Bac de Roda",
+        "Artigues | Sant Adrià",
+        "Verneda",
+        "Paral·lel"
+      ]
+    },
+    {
+      "id": "L11",
+      "color": "#89B94C",
+      "stations": [
+        "Can Cuiàs",
+        "Torre Baró | Vallbona",
+        "Casa de l'Aigua",
+        "Trinitat Nova",
+        "Ciutat Meridiana"
+      ]
+    },
+    {
+      "id": "L9N",
+      "color": "#FB712B",
+      "stations": [
+        "Onze de Setembre",
+        "Can Peixauet",
+        "Can Zam",
+        "Singuerlín",
+        "Bon Pastor",
+        "Santa Rosa",
+        "La Sagrera",
+        "Fondo",
+        "Església Major"
+      ]
+    },
+    {
+      "id": "L10N",
+      "color": "#00A6D6",
+      "stations": [
+        "Onze de Setembre",
+        "Bon Pastor",
+        "La Sagrera",
+        "Llefià",
+        "La Salut",
+        "Gorg"
+      ]
+    },
+    {
+      "id": "L9S",
+      "color": "#FB712B",
+      "stations": [
+        "Aeroport T2",
+        "Mercabarna",
+        "Zona Universitària",
+        "Aeroport T1",
+        "Mas Blau",
+        "Parc Nou",
+        "El Prat Estació",
+        "Les Moreres",
+        "Parc Logístic",
+        "Fira",
+        "Europa | Fira",
+        "Can Tries | Gornal",
+        "Torrassa",
+        "Collblanc",
+        "Cèntric"
+      ]
+    }
+  ],
+  "stations": {
+    "Can Serra": {
+      "name": "Can Serra",
+      "lat": 41.36769401,
+      "lon": 2.10275752,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Rocafort": {
+      "name": "Rocafort",
+      "lat": 41.37923215,
+      "lon": 2.15456248,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Arc de Triomf": {
+      "name": "Arc de Triomf",
+      "lat": 41.39233666,
+      "lon": 2.18116467,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Torras i Bages": {
+      "name": "Torras i Bages",
+      "lat": 41.44322471,
+      "lon": 2.19067063,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Hostafrancs": {
+      "name": "Hostafrancs",
+      "lat": 41.37525363,
+      "lon": 2.14329127,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Bellvitge": {
+      "name": "Bellvitge",
+      "lat": 41.35097554,
+      "lon": 2.110917,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Florida": {
+      "name": "Florida",
+      "lat": 41.36831605,
+      "lon": 2.11002737,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Santa Eulàlia": {
+      "name": "Santa Eulàlia",
+      "lat": 41.36881637,
+      "lon": 2.12861726,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Urgell": {
+      "name": "Urgell",
+      "lat": 41.3824874,
+      "lon": 2.15889091,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Espanya": {
+      "name": "Espanya",
+      "lat": 41.37551004,
+      "lon": 2.1493825,
+      "lines": [
+        "L1",
+        "L3"
+      ],
+      "interchange": true
+    },
+    "Urquinaona": {
+      "name": "Urquinaona",
+      "lat": 41.38963643,
+      "lon": 2.17456658,
+      "lines": [
+        "L1",
+        "L4"
+      ],
+      "interchange": true
+    },
+    "Glòries": {
+      "name": "Glòries",
+      "lat": 41.40227722,
+      "lon": 2.18753747,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Fabra i Puig": {
+      "name": "Fabra i Puig",
+      "lat": 41.4296326,
+      "lon": 2.18366143,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Clot": {
+      "name": "Clot",
+      "lat": 41.41016343,
+      "lon": 2.18700271,
+      "lines": [
+        "L1",
+        "L2"
+      ],
+      "interchange": true
+    },
+    "Santa Coloma": {
+      "name": "Santa Coloma",
+      "lat": 41.45106735,
+      "lon": 2.20796946,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Hospital de Bellvitge": {
+      "name": "Hospital de Bellvitge",
+      "lat": 41.34467731,
+      "lon": 2.10724192,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Rambla Just Oliveras": {
+      "name": "Rambla Just Oliveras",
+      "lat": 41.36408991,
+      "lon": 2.09974934,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Torrassa": {
+      "name": "Torrassa",
+      "lat": 41.36839566,
+      "lon": 2.11659379,
+      "lines": [
+        "L1",
+        "L10S",
+        "L9S"
+      ],
+      "interchange": true
+    },
+    "Universitat": {
+      "name": "Universitat",
+      "lat": 41.3858149,
+      "lon": 2.16428386,
+      "lines": [
+        "L1",
+        "L2"
+      ],
+      "interchange": true
+    },
+    "Marina": {
+      "name": "Marina",
+      "lat": 41.39472529,
+      "lon": 2.18580103,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "La Sagrera": {
+      "name": "La Sagrera",
+      "lat": 41.42236877,
+      "lon": 2.18697533,
+      "lines": [
+        "L1",
+        "L5",
+        "L9N",
+        "L10N"
+      ],
+      "interchange": true
+    },
+    "Baró de Viver": {
+      "name": "Baró de Viver",
+      "lat": 41.449936,
+      "lon": 2.19956302,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Plaça de Sants": {
+      "name": "Plaça de Sants",
+      "lat": 41.37535307,
+      "lon": 2.13815393,
+      "lines": [
+        "L1",
+        "L5"
+      ],
+      "interchange": true
+    },
+    "Mercat Nou": {
+      "name": "Mercat Nou",
+      "lat": 41.3730027,
+      "lon": 2.13353578,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Fondo": {
+      "name": "Fondo",
+      "lat": 41.45158315,
+      "lon": 2.21843513,
+      "lines": [
+        "L1",
+        "L9N"
+      ],
+      "interchange": true
+    },
+    "Av. Carrilet": {
+      "name": "Av. Carrilet",
+      "lat": 41.35855331,
+      "lon": 2.10263153,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Trinitat Vella": {
+      "name": "Trinitat Vella",
+      "lat": 41.44895649,
+      "lon": 2.19383728,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Sant Andreu": {
+      "name": "Sant Andreu",
+      "lat": 41.43660044,
+      "lon": 2.19118689,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Navas": {
+      "name": "Navas",
+      "lat": 41.41618671,
+      "lon": 2.18705678,
+      "lines": [
+        "L1"
+      ],
+      "interchange": false
+    },
+    "Catalunya": {
+      "name": "Catalunya",
+      "lat": 41.38748943,
+      "lon": 2.1689946,
+      "lines": [
+        "L1",
+        "L3"
+      ],
+      "interchange": true
+    },
+    "Ciutat de la Justícia": {
+      "name": "Ciutat de la Justícia",
+      "lat": 41.36313727,
+      "lon": 2.13231497,
+      "lines": [
+        "L10S"
+      ],
+      "interchange": false
+    },
+    "ZAL | Riu Vell": {
+      "name": "ZAL | Riu Vell",
+      "lat": 41.32370587,
+      "lon": 2.13309543,
+      "lines": [
+        "L10S"
+      ],
+      "interchange": false
+    },
+    "Port Comercial | La Factoria": {
+      "name": "Port Comercial | La Factoria",
+      "lat": 41.33598305,
+      "lon": 2.14065723,
+      "lines": [
+        "L10S"
+      ],
+      "interchange": false
+    },
+    "Zona Franca": {
+      "name": "Zona Franca",
+      "lat": 41.3429761,
+      "lon": 2.14496443,
+      "lines": [
+        "L10S"
+      ],
+      "interchange": false
+    },
+    "Foc": {
+      "name": "Foc",
+      "lat": 41.35616087,
+      "lon": 2.14180432,
+      "lines": [
+        "L10S"
+      ],
+      "interchange": false
+    },
+    "Foneria": {
+      "name": "Foneria",
+      "lat": 41.36109924,
+      "lon": 2.13822891,
+      "lines": [
+        "L10S"
+      ],
+      "interchange": false
+    },
+    "Provençana": {
+      "name": "Provençana",
+      "lat": 41.36135378,
+      "lon": 2.12409979,
+      "lines": [
+        "L10S"
+      ],
+      "interchange": false
+    },
+    "Can Tries | Gornal": {
+      "name": "Can Tries | Gornal",
+      "lat": 41.36089363,
+      "lon": 2.11799258,
+      "lines": [
+        "L10S",
+        "L9S"
+      ],
+      "interchange": true
+    },
+    "Collblanc": {
+      "name": "Collblanc",
+      "lat": 41.37605648,
+      "lon": 2.11839717,
+      "lines": [
+        "L10S",
+        "L5",
+        "L9S"
+      ],
+      "interchange": true
+    },
+    "Ecoparc": {
+      "name": "Ecoparc",
+      "lat": 41.33015871,
+      "lon": 2.13707118,
+      "lines": [
+        "L10S"
+      ],
+      "interchange": false
+    },
+    "Parc de Montjuïc": {
+      "name": "Parc de Montjuïc",
+      "lat": 41.36895607,
+      "lon": 2.16326877,
+      "lines": [
+        "FM"
+      ],
+      "interchange": false
+    },
+    "Paral·lel": {
+      "name": "Paral·lel",
+      "lat": 41.37384753,
+      "lon": 2.16885318,
+      "lines": [
+        "FM",
+        "L3",
+        "L2"
+      ],
+      "interchange": true
+    },
+    "Penitents": {
+      "name": "Penitents",
+      "lat": 41.41827912,
+      "lon": 2.14097179,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Tarragona": {
+      "name": "Tarragona",
+      "lat": 41.378493,
+      "lon": 2.14533577,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Maria Cristina": {
+      "name": "Maria Cristina",
+      "lat": 41.38781569,
+      "lon": 2.12579123,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Les Corts": {
+      "name": "Les Corts",
+      "lat": 41.38411968,
+      "lon": 2.13087101,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Zona Universitària": {
+      "name": "Zona Universitària",
+      "lat": 41.38411534,
+      "lon": 2.11117853,
+      "lines": [
+        "L3",
+        "L9S"
+      ],
+      "interchange": true
+    },
+    "Sants Estació": {
+      "name": "Sants Estació",
+      "lat": 41.38159825,
+      "lon": 2.14099226,
+      "lines": [
+        "L3",
+        "L5"
+      ],
+      "interchange": true
+    },
+    "Mundet": {
+      "name": "Mundet",
+      "lat": 41.43564527,
+      "lon": 2.1484718,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Canyelles": {
+      "name": "Canyelles",
+      "lat": 41.44175373,
+      "lon": 2.16638755,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Trinitat Nova": {
+      "name": "Trinitat Nova",
+      "lat": 41.44950032,
+      "lon": 2.18409714,
+      "lines": [
+        "L3",
+        "L4",
+        "L11"
+      ],
+      "interchange": true
+    },
+    "Poble Sec": {
+      "name": "Poble Sec",
+      "lat": 41.3749962,
+      "lon": 2.16024482,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Liceu": {
+      "name": "Liceu",
+      "lat": 41.38144543,
+      "lon": 2.17303028,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Drassanes": {
+      "name": "Drassanes",
+      "lat": 41.37653761,
+      "lon": 2.17566417,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Fontana": {
+      "name": "Fontana",
+      "lat": 41.40200888,
+      "lon": 2.15302244,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Vallcarca": {
+      "name": "Vallcarca",
+      "lat": 41.41197495,
+      "lon": 2.14433731,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Lesseps": {
+      "name": "Lesseps",
+      "lat": 41.40573803,
+      "lon": 2.15040712,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Montbau": {
+      "name": "Montbau",
+      "lat": 41.43062016,
+      "lon": 2.14503928,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Palau Reial": {
+      "name": "Palau Reial",
+      "lat": 41.38598006,
+      "lon": 2.11853818,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Valldaura": {
+      "name": "Valldaura",
+      "lat": 41.43799608,
+      "lon": 2.15687783,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Plaça del Centre": {
+      "name": "Plaça del Centre",
+      "lat": 41.38192171,
+      "lon": 2.13588371,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Passeig de Gràcia": {
+      "name": "Passeig de Gràcia",
+      "lat": 41.39160316,
+      "lon": 2.16534697,
+      "lines": [
+        "L3",
+        "L4",
+        "L2"
+      ],
+      "interchange": true
+    },
+    "Roquetes": {
+      "name": "Roquetes",
+      "lat": 41.44766968,
+      "lon": 2.17609769,
+      "lines": [
+        "L3"
+      ],
+      "interchange": false
+    },
+    "Vall d'Hebron": {
+      "name": "Vall d'Hebron",
+      "lat": 41.42528266,
+      "lon": 2.1425646,
+      "lines": [
+        "L3",
+        "L5"
+      ],
+      "interchange": true
+    },
+    "Diagonal": {
+      "name": "Diagonal",
+      "lat": 41.39588795,
+      "lon": 2.16004746,
+      "lines": [
+        "L3",
+        "L5"
+      ],
+      "interchange": true
+    },
+    "Congrés": {
+      "name": "Congrés",
+      "lat": 41.42344043,
+      "lon": 2.18118622,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Cornellà Centre": {
+      "name": "Cornellà Centre",
+      "lat": 41.35728982,
+      "lon": 2.07042809,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Hospital Clínic": {
+      "name": "Hospital Clínic",
+      "lat": 41.38860776,
+      "lon": 2.15108107,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "El Carmel": {
+      "name": "El Carmel",
+      "lat": 41.42444977,
+      "lon": 2.15509894,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Ernest Lluch": {
+      "name": "Ernest Lluch",
+      "lat": 41.37589761,
+      "lon": 2.11202731,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Gavarra": {
+      "name": "Gavarra",
+      "lat": 41.35799332,
+      "lon": 2.07926872,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Sant Ildefons": {
+      "name": "Sant Ildefons",
+      "lat": 41.36338108,
+      "lon": 2.08439279,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Can Boixeres": {
+      "name": "Can Boixeres",
+      "lat": 41.36657075,
+      "lon": 2.09150609,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Can Vidalet": {
+      "name": "Can Vidalet",
+      "lat": 41.3712788,
+      "lon": 2.09944503,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Pubilla Cases": {
+      "name": "Pubilla Cases",
+      "lat": 41.37383759,
+      "lon": 2.10720906,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Badal": {
+      "name": "Badal",
+      "lat": 41.37558063,
+      "lon": 2.12740211,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Entença": {
+      "name": "Entença",
+      "lat": 41.38446686,
+      "lon": 2.14561859,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Verdaguer": {
+      "name": "Verdaguer",
+      "lat": 41.39895175,
+      "lon": 2.16708943,
+      "lines": [
+        "L5",
+        "L4"
+      ],
+      "interchange": true
+    },
+    "Sagrada Família": {
+      "name": "Sagrada Família",
+      "lat": 41.40383491,
+      "lon": 2.17361767,
+      "lines": [
+        "L5",
+        "L2"
+      ],
+      "interchange": true
+    },
+    "Sant Pau | Dos de Maig": {
+      "name": "Sant Pau | Dos de Maig",
+      "lat": 41.41075328,
+      "lon": 2.17601603,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Camp de l'Arpa": {
+      "name": "Camp de l'Arpa",
+      "lat": 41.41505961,
+      "lon": 2.18149721,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Maragall": {
+      "name": "Maragall",
+      "lat": 41.42504535,
+      "lon": 2.176485,
+      "lines": [
+        "L5",
+        "L4"
+      ],
+      "interchange": true
+    },
+    "Virrei Amat": {
+      "name": "Virrei Amat",
+      "lat": 41.42970334,
+      "lon": 2.17491306,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Vilapicina": {
+      "name": "Vilapicina",
+      "lat": 41.43046507,
+      "lon": 2.16761908,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Horta": {
+      "name": "Horta",
+      "lat": 41.42969252,
+      "lon": 2.1599744,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "El Coll | La Teixonera": {
+      "name": "El Coll | La Teixonera",
+      "lat": 41.42199714,
+      "lon": 2.1483485,
+      "lines": [
+        "L5"
+      ],
+      "interchange": false
+    },
+    "Llacuna": {
+      "name": "Llacuna",
+      "lat": 41.39942504,
+      "lon": 2.19771171,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Besòs": {
+      "name": "Besòs",
+      "lat": 41.41990128,
+      "lon": 2.21023143,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "La Pau": {
+      "name": "La Pau",
+      "lat": 41.42367799,
+      "lon": 2.20519361,
+      "lines": [
+        "L4",
+        "L2"
+      ],
+      "interchange": true
+    },
+    "El Maresme | Fòrum": {
+      "name": "El Maresme | Fòrum",
+      "lat": 41.41177981,
+      "lon": 2.21669194,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Barceloneta": {
+      "name": "Barceloneta",
+      "lat": 41.38181098,
+      "lon": 2.18478678,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Girona": {
+      "name": "Girona",
+      "lat": 41.39492035,
+      "lon": 2.17082483,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Joanic": {
+      "name": "Joanic",
+      "lat": 41.4064269,
+      "lon": 2.16322503,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Poblenou": {
+      "name": "Poblenou",
+      "lat": 41.40371612,
+      "lon": 2.20337123,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Selva de Mar": {
+      "name": "Selva de Mar",
+      "lat": 41.40800151,
+      "lon": 2.2091225,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Bogatell": {
+      "name": "Bogatell",
+      "lat": 41.3951075,
+      "lon": 2.1920124,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Jaume I": {
+      "name": "Jaume I",
+      "lat": 41.38412627,
+      "lon": 2.17853146,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Alfons X": {
+      "name": "Alfons X",
+      "lat": 41.41237708,
+      "lon": 2.16638232,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Llucmajor": {
+      "name": "Llucmajor",
+      "lat": 41.43698465,
+      "lon": 2.1733434,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Besòs Mar": {
+      "name": "Besòs Mar",
+      "lat": 41.415099,
+      "lon": 2.21608159,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Via Júlia": {
+      "name": "Via Júlia",
+      "lat": 41.44373023,
+      "lon": 2.17854996,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Ciutadella | Vila Olímpica": {
+      "name": "Ciutadella | Vila Olímpica",
+      "lat": 41.38668674,
+      "lon": 2.19299071,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Guinardó | Hospital de Sant Pau": {
+      "name": "Guinardó | Hospital de Sant Pau",
+      "lat": 41.4159622,
+      "lon": 2.17398904,
+      "lines": [
+        "L4"
+      ],
+      "interchange": false
+    },
+    "Tetuan": {
+      "name": "Tetuan",
+      "lat": 41.39488745,
+      "lon": 2.17555918,
+      "lines": [
+        "L2"
+      ],
+      "interchange": false
+    },
+    "Monumental": {
+      "name": "Monumental",
+      "lat": 41.40052374,
+      "lon": 2.17946167,
+      "lines": [
+        "L2"
+      ],
+      "interchange": false
+    },
+    "Sant Martí": {
+      "name": "Sant Martí",
+      "lat": 41.41906362,
+      "lon": 2.20072391,
+      "lines": [
+        "L2"
+      ],
+      "interchange": false
+    },
+    "Gorg": {
+      "name": "Gorg",
+      "lat": 41.44023722,
+      "lon": 2.23344099,
+      "lines": [
+        "L2",
+        "L10N"
+      ],
+      "interchange": true
+    },
+    "Badalona Pompeu Fabra": {
+      "name": "Badalona Pompeu Fabra",
+      "lat": 41.44905421,
+      "lon": 2.24409682,
+      "lines": [
+        "L2"
+      ],
+      "interchange": false
+    },
+    "Encants": {
+      "name": "Encants",
+      "lat": 41.40723598,
+      "lon": 2.18270037,
+      "lines": [
+        "L2"
+      ],
+      "interchange": false
+    },
+    "Sant Roc": {
+      "name": "Sant Roc",
+      "lat": 41.43583082,
+      "lon": 2.22860618,
+      "lines": [
+        "L2"
+      ],
+      "interchange": false
+    },
+    "Pep Ventura": {
+      "name": "Pep Ventura",
+      "lat": 41.44390457,
+      "lon": 2.23795938,
+      "lines": [
+        "L2"
+      ],
+      "interchange": false
+    },
+    "Sant Antoni": {
+      "name": "Sant Antoni",
+      "lat": 41.37983284,
+      "lon": 2.16324114,
+      "lines": [
+        "L2"
+      ],
+      "interchange": false
+    },
+    "Bac de Roda": {
+      "name": "Bac de Roda",
+      "lat": 41.41516206,
+      "lon": 2.19550325,
+      "lines": [
+        "L2"
+      ],
+      "interchange": false
+    },
+    "Artigues | Sant Adrià": {
+      "name": "Artigues | Sant Adrià",
+      "lat": 41.43384823,
+      "lon": 2.21777176,
+      "lines": [
+        "L2"
+      ],
+      "interchange": false
+    },
+    "Verneda": {
+      "name": "Verneda",
+      "lat": 41.43000446,
+      "lon": 2.20988342,
+      "lines": [
+        "L2"
+      ],
+      "interchange": false
+    },
+    "Can Cuiàs": {
+      "name": "Can Cuiàs",
+      "lat": 41.4624131,
+      "lon": 2.17305936,
+      "lines": [
+        "L11"
+      ],
+      "interchange": false
+    },
+    "Torre Baró | Vallbona": {
+      "name": "Torre Baró | Vallbona",
+      "lat": 41.45919575,
+      "lon": 2.17988358,
+      "lines": [
+        "L11"
+      ],
+      "interchange": false
+    },
+    "Casa de l'Aigua": {
+      "name": "Casa de l'Aigua",
+      "lat": 41.45127784,
+      "lon": 2.18483965,
+      "lines": [
+        "L11"
+      ],
+      "interchange": false
+    },
+    "Ciutat Meridiana": {
+      "name": "Ciutat Meridiana",
+      "lat": 41.46080821,
+      "lon": 2.17464988,
+      "lines": [
+        "L11"
+      ],
+      "interchange": false
+    },
+    "Onze de Setembre": {
+      "name": "Onze de Setembre",
+      "lat": 41.42955883,
+      "lon": 2.19356402,
+      "lines": [
+        "L9N",
+        "L10N"
+      ],
+      "interchange": true
+    },
+    "Can Peixauet": {
+      "name": "Can Peixauet",
+      "lat": 41.44398591,
+      "lon": 2.21002733,
+      "lines": [
+        "L9N"
+      ],
+      "interchange": false
+    },
+    "Can Zam": {
+      "name": "Can Zam",
+      "lat": 41.45666611,
+      "lon": 2.19856942,
+      "lines": [
+        "L9N"
+      ],
+      "interchange": false
+    },
+    "Singuerlín": {
+      "name": "Singuerlín",
+      "lat": 41.45941352,
+      "lon": 2.20542885,
+      "lines": [
+        "L9N"
+      ],
+      "interchange": false
+    },
+    "Bon Pastor": {
+      "name": "Bon Pastor",
+      "lat": 41.43620277,
+      "lon": 2.20529436,
+      "lines": [
+        "L9N",
+        "L10N"
+      ],
+      "interchange": true
+    },
+    "Santa Rosa": {
+      "name": "Santa Rosa",
+      "lat": 41.44685031,
+      "lon": 2.21580898,
+      "lines": [
+        "L9N"
+      ],
+      "interchange": false
+    },
+    "Església Major": {
+      "name": "Església Major",
+      "lat": 41.45479704,
+      "lon": 2.21217687,
+      "lines": [
+        "L9N"
+      ],
+      "interchange": false
+    },
+    "Llefià": {
+      "name": "Llefià",
+      "lat": 41.44135958,
+      "lon": 2.21690638,
+      "lines": [
+        "L10N"
+      ],
+      "interchange": false
+    },
+    "La Salut": {
+      "name": "La Salut",
+      "lat": 41.4428171,
+      "lon": 2.22473707,
+      "lines": [
+        "L10N"
+      ],
+      "interchange": false
+    },
+    "Aeroport T2": {
+      "name": "Aeroport T2",
+      "lat": 41.30382333,
+      "lon": 2.07311333,
+      "lines": [
+        "L9S"
+      ],
+      "interchange": false
+    },
+    "Mercabarna": {
+      "name": "Mercabarna",
+      "lat": 41.3334846,
+      "lon": 2.11125373,
+      "lines": [
+        "L9S"
+      ],
+      "interchange": false
+    },
+    "Aeroport T1": {
+      "name": "Aeroport T1",
+      "lat": 41.28829484,
+      "lon": 2.07115199,
+      "lines": [
+        "L9S"
+      ],
+      "interchange": false
+    },
+    "Mas Blau": {
+      "name": "Mas Blau",
+      "lat": 41.31122536,
+      "lon": 2.07347106,
+      "lines": [
+        "L9S"
+      ],
+      "interchange": false
+    },
+    "Parc Nou": {
+      "name": "Parc Nou",
+      "lat": 41.31662845,
+      "lon": 2.08792943,
+      "lines": [
+        "L9S"
+      ],
+      "interchange": false
+    },
+    "El Prat Estació": {
+      "name": "El Prat Estació",
+      "lat": 41.33199264,
+      "lon": 2.0899271,
+      "lines": [
+        "L9S"
+      ],
+      "interchange": false
+    },
+    "Les Moreres": {
+      "name": "Les Moreres",
+      "lat": 41.32911864,
+      "lon": 2.10307309,
+      "lines": [
+        "L9S"
+      ],
+      "interchange": false
+    },
+    "Parc Logístic": {
+      "name": "Parc Logístic",
+      "lat": 41.34166355,
+      "lon": 2.12740125,
+      "lines": [
+        "L9S"
+      ],
+      "interchange": false
+    },
+    "Fira": {
+      "name": "Fira",
+      "lat": 41.35198805,
+      "lon": 2.1304515,
+      "lines": [
+        "L9S"
+      ],
+      "interchange": false
+    },
+    "Europa | Fira": {
+      "name": "Europa | Fira",
+      "lat": 41.35756043,
+      "lon": 2.12592378,
+      "lines": [
+        "L9S"
+      ],
+      "interchange": false
+    },
+    "Cèntric": {
+      "name": "Cèntric",
+      "lat": 41.32225002,
+      "lon": 2.09346324,
+      "lines": [
+        "L9S"
+      ],
+      "interchange": false
+    }
+  }
+};
+
+/* config sonora per línia (la xarxa no porta headway/registre) */
+const SCALE=[['A',2],['C',3],['D',3],['E',3],['G',3],['A',3],['C',4],['D',4],['E',4],['G',4],['A',4]];
+const LCFG={
+ L1:{n:['A',2],h:210,j:0.10,a:false}, L2:{n:['C',3],h:240,j:0.10,a:false},
+ L3:{n:['D',3],h:180,j:0.09,a:false}, L4:{n:['E',3],h:255,j:0.11,a:false},
+ L5:{n:['G',3],h:195,j:0.08,a:false}, L9N:{n:['A',3],h:420,j:0.02,a:true},
+ L9S:{n:['C',4],h:300,j:0.02,a:true}, L10N:{n:['D',4],h:480,j:0.02,a:true},
+ L10S:{n:['E',4],h:360,j:0.02,a:true}, L11:{n:['G',4],h:600,j:0.02,a:true},
+ FM:{n:['A',4],h:240,j:0.03,a:true},
+};
+const PC={C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
+const nf=(n,o)=>440*Math.pow(2,(((o+1)*12+PC[n])-69)/12);
+
+/* L'API torna les estacions sense ordre fiable → reordenem geomètricament:
+   trobem els dos extrems (parell més allunyat) i fem cadena de veí més proper. */
+const dist=(a,b)=>{const dx=a.lon-b.lon,dy=a.lat-b.lat;return dx*dx+dy*dy;};
+function orderByGeo(arr){
+  if(arr.length<3)return arr;
+  let A=0,best=-1;
+  for(let i=0;i<arr.length;i++)for(let j=i+1;j<arr.length;j++){
+    const d=dist(arr[i],arr[j]); if(d>best){best=d;A=i;}}
+  const used=new Array(arr.length).fill(false); used[A]=true;
+  const path=[arr[A]]; let cur=arr[A];
+  while(path.length<arr.length){
+    let nn=-1,nd=Infinity;
+    for(let i=0;i<arr.length;i++){if(used[i])continue;const d=dist(cur,arr[i]);if(d<nd){nd=d;nn=i;}}
+    used[nn]=true; path.push(arr[nn]); cur=arr[nn];
+  }
+  return path;
+}
+
+let NET=NET_EMBED, LINES=[], STA={};
+function setup(){
+  STA={}; LINES=[];
+  NET.lines.forEach((L,i)=>{
+    const cfg=LCFG[L.id]||{n:SCALE[i%SCALE.length],h:240,j:0.06,a:true};
+    const o={id:L.id,color:L.color,note:nf(cfg.n[0],cfg.n[1]),head:cfg.h,jitter:cfg.j,auto:cfg.a,
+             theta:Math.random()*2*Math.PI,cur:0,on:true,seq:[]};
+    L.stations.forEach(nm=>{
+      let s=STA[nm]; const src=NET.stations[nm];
+      if(!src) return;
+      if(!s){s={name:nm,lat:src.lat,lon:src.lon,inter:!!src.interchange,lines:src.lines||[],flash:0};STA[nm]=s;}
+      o.seq.push(s);
+    });
+    o.seq=orderByGeo(o.seq);   // reordena per dibuixar la línia neta
+    LINES.push(o);
+  });
+  // projecció lat/lon → viewBox
+  const all=Object.values(STA),M=46,W=1000,H=900;
+  const la=all.map(s=>s.lat),lo=all.map(s=>s.lon);
+  const minLa=Math.min(...la),maxLa=Math.max(...la),minLo=Math.min(...lo),maxLo=Math.max(...lo);
+  const sx=(W-2*M)/(maxLo-minLo), sy=(H-2*M)/(maxLa-minLa), s0=Math.min(sx,sy); // isotròpic
+  const offX=(W-(maxLo-minLo)*s0)/2, offY=(H-(maxLa-minLa)*s0)/2;
+  for(const s of all){
+    s.x=offX+(s.lon-minLo)*s0;
+    s.y=offY+(maxLa-s.lat)*s0;
+    s.pan=Math.max(-1,Math.min(1,((s.x-M)/(W-2*M))*2-1));
+  }
+}
+
+/* ---------- render SVG ---------- */
+const svg=document.getElementById('map'),SVGNS='http://www.w3.org/2000/svg';
+const elm=(t,a)=>{const e=document.createElementNS(SVGNS,t);for(const k in a)e.setAttribute(k,a[k]);return e;};
+function render(){
+  svg.innerHTML='';
+  for(const L of LINES){
+    if(L.seq.length<2)continue;
+    const d='M'+L.seq.map(s=>`${s.x.toFixed(1)} ${s.y.toFixed(1)}`).join(' L ');
+    L.pathEl=elm('path',{d,fill:'none',stroke:L.color,'stroke-width':3.2,'stroke-linejoin':'round',
+      'stroke-linecap':'round','stroke-opacity':0.5}); svg.appendChild(L.pathEl);
+  }
+  for(const s of Object.values(STA)){
+    const base=s.inter?5.5:3.2;
+    s.base=base;
+    s.wave=elm('circle',{cx:s.x,cy:s.y,r:base,fill:'none',stroke:'#fff','stroke-width':1.5,'stroke-opacity':0});
+    s.halo=elm('circle',{cx:s.x,cy:s.y,r:base,fill:'#fff','fill-opacity':0});
+    s.core=elm('circle',{cx:s.x,cy:s.y,r:base,fill:s.inter?'#0a0c12':'#0d1018',
+      stroke:s.inter?'#fff':colorOf(s),'stroke-width':s.inter?2:1.5});
+    svg.appendChild(s.wave);svg.appendChild(s.halo);svg.appendChild(s.core);
+  }
+  document.getElementById('nst').textContent=Object.keys(STA).length;
+}
+const colorOf=s=>{const L=LINES.find(l=>l.id===(s.lines[0]));return L?L.color:'#888';};
+
+/* ---------- àudio ---------- */
+let bus,reverb,masterFilter,masterVol,limiter,ready=false;
+function master(){
+  limiter=new Tone.Limiter(-2).toDestination();
+  masterVol=new Tone.Gain(Tone.dbToGain(-9)).connect(limiter);
+  masterFilter=new Tone.Filter(6000,'lowpass').connect(masterVol);
+  reverb=new Tone.Reverb({decay:5.5,wet:0.32,preDelay:0.02}).connect(masterFilter);
+  bus=new Tone.Gain(0.9).connect(reverb); ready=true;
+}
+let activeVoices=0; const MAX=56;
+function neuron(time,freq,pan,gain,hub){            // gest NEURONA
+  if(activeVoices>=MAX)return; activeVoices++;
+  const p=new Tone.Panner(pan).connect(bus),amp=new Tone.Gain(0).connect(p);
+  const osc=new Tone.Oscillator(freq*0.5,hub?'sine':'triangle').connect(amp);
+  const tail=hub?1.9:0.95;
+  osc.frequency.setValueAtTime(freq*0.5,time);
+  osc.frequency.exponentialRampToValueAtTime(freq,time+0.055);
+  amp.gain.setValueAtTime(0,time);
+  amp.gain.linearRampToValueAtTime(gain,time+0.006);
+  amp.gain.exponentialRampToValueAtTime(0.0001,time+tail);
+  osc.start(time);osc.stop(time+tail+0.05);
+  setTimeout(()=>{try{osc.dispose();amp.dispose();p.dispose();}catch(e){}activeVoices--;},
+    Math.max(0,(time-Tone.now())+tail+0.3)*1000);
+}
+function accent(time,freq,gain){
+  const amp=new Tone.Gain(0).connect(bus),osc=new Tone.Oscillator(freq/2,'sine').connect(amp);
+  amp.gain.setValueAtTime(0,time);amp.gain.linearRampToValueAtTime(gain,time+0.004);
+  amp.gain.exponentialRampToValueAtTime(0.0001,time+0.5);
+  osc.start(time);osc.stop(time+0.55);
+  setTimeout(()=>{try{osc.dispose();amp.dispose();}catch(e){}},900);
+}
+
+let lastEmit=[],emitCount=0,syncAmt=1;
+function emit(L,time){
+  const s=L.seq[L.cur]; if(!s)return; L.cur=(L.cur+1)%L.seq.length;
+  const hub=s.inter,freq=L.note*(hub?0.5:1); let gain=hub?0.8:0.5;
+  const COINC=0.07*(25/comp); let reinf=false;
+  for(const e of lastEmit){if(time-e<COINC){reinf=true;break;}}
+  lastEmit.push(time); if(lastEmit.length>24)lastEmit.shift();
+  if(reinf){gain*=1+0.6*syncAmt; if(syncAmt>0.05)accent(time,L.note,0.28*syncAmt);}
+  neuron(time,freq,s.pan,gain,hub);
+  setTimeout(()=>{s.flash=Math.max(s.flash,reinf?1.4:1);},Math.max(0,(time-Tone.now())*1000));
+  emitCount++;
+}
+
+/* ---------- Kuramoto ---------- */
+let comp=25,K=0,r=0,psi=0,lastT=0,running=false;
+const omega=L=>2*Math.PI/(L.head/comp);
+function order(){let x=0,y=0,n=0;for(const L of LINES){if(!L.on)continue;x+=Math.cos(L.theta);y+=Math.sin(L.theta);n++;}
+  if(!n){r=0;return;}x/=n;y/=n;r=Math.hypot(x,y);psi=Math.atan2(y,x);}
+function step(now){
+  const dt=Math.min(0.05,(now-lastT)/1000)||0; lastT=now;
+  if(ready&&running){
+    order();
+    for(const L of LINES){if(!L.on)continue;
+      const w=omega(L),noise=(Math.random()*2-1)*L.jitter*w;
+      const dth=(w+K*r*Math.sin(psi-L.theta)+noise)*dt,prev=L.theta; L.theta+=dth;
+      if(L.theta>=2*Math.PI){L.theta-=2*Math.PI;
+        const frac=(2*Math.PI-prev)/Math.max(1e-6,dth);
+        emit(L,Tone.now()+0.03+(1-frac)*dt);}
+    }
+    if(masterFilter)masterFilter.frequency.rampTo(1600+9000*r,0.3);
+    if(reverb)reverb.wet.rampTo(0.18+0.22*(1-r),0.5);
+  }
+  for(const s of Object.values(STA)){
+    if(s.flash>0.01){
+      const b=s.base,f=s.flash;
+      s.halo.setAttribute('r',(b+f*15).toFixed(1));
+      s.halo.setAttribute('fill-opacity',(0.5*f).toFixed(3));
+      s.wave.setAttribute('r',(b+(1.4-f)*22+6).toFixed(1));   // ona que s'expandeix
+      s.wave.setAttribute('stroke-opacity',(0.55*Math.min(1,f)).toFixed(3));
+      s.core.setAttribute('r',(b+f*3).toFixed(2));
+      s.core.setAttribute('fill',f>0.5?'#fff':(s.inter?'#0a0c12':'#0d1018'));
+      s.flash*=0.90;
+      if(s.flash<0.01){s.flash=0;s.halo.setAttribute('fill-opacity',0);s.wave.setAttribute('stroke-opacity',0);
+        s.core.setAttribute('r',b);s.core.setAttribute('fill',s.inter?'#0a0c12':'#0d1018');}
+    }
+  }
+  document.getElementById('coh').textContent=r.toFixed(2);
+  document.getElementById('voices').textContent=activeVoices;
+  requestAnimationFrame(step);
+}
+setInterval(()=>{document.getElementById('eps').textContent=emitCount;emitCount=0;},1000);
+
+/* ---------- UI ---------- */
+function buildLineList(){
+  const lc=document.getElementById('lines'); lc.innerHTML='';
+  LINES.forEach(L=>{
+    const d=document.createElement('div');d.className='ln';
+    d.innerHTML=`<span class="sw" style="background:${L.color}"></span>
+      <span class="nm" style="color:${L.color}">${L.id}</span>
+      <span class="meta">${L.seq.length} est · ${L.auto?'automàtica':'manual'}</span>`;
+    d.onclick=()=>{L.on=!L.on;d.classList.toggle('off',!L.on);
+      if(L.pathEl)L.pathEl.setAttribute('stroke-opacity',L.on?0.5:0.1);};
+    lc.appendChild(d);
+  });
+}
+const power=document.getElementById('power');
+power.onclick=async()=>{
+  if(!running){await Tone.start();if(!ready)master();running=true;lastT=performance.now();
+    power.textContent='■ Atura';power.classList.add('stop');}
+  else{running=false;power.textContent='▶ Activa l\'àudio';power.classList.remove('stop');}
+};
+const bind=(id,fn,fmt)=>{const e=document.getElementById(id);
+  e.oninput=()=>{fn(parseFloat(e.value));if(fmt)document.getElementById(id+'V').textContent=fmt(e.value);};};
+bind('vol',v=>{if(masterVol)masterVol.gain.rampTo(Tone.dbToGain(v),0.1);},v=>`${v} dB`);
+bind('comp',v=>{comp=v;},v=>`${v}×`);
+bind('k',v=>{K=v;},v=>(+v).toFixed(2));
+bind('sync',v=>{syncAmt=v;},v=>{const n=+v;return n<0.66?'baix':n<1.33?'mitjà':'alt';});
+
+function boot(){
+  setup();render();buildLineList();
+  const d=new Date(NET.generatAt||Date.now());
+  document.getElementById('srcline').textContent=
+    `Font: network.json · ${LINES.length} línies · ${Object.keys(STA).length} estacions · generat ${d.toLocaleDateString('ca-ES')}`;
+  requestAnimationFrame(step);
+}
+// si se serveix per web, prova d'agafar el network.json fresc; si falla (file://), usa l'incrustat
+fetch('network.json').then(r=>r.ok?r.json():Promise.reject()).then(j=>{NET=j;boot();}).catch(()=>boot());
+</script>
+</body>
+</html>

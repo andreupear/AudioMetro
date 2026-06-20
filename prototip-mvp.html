@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AudioMetro — Prototip MVP (gestos + Kuramoto urbà)</title>
+<!-- Tone.js des de CDN (cap dependència local) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<style>
+  :root{
+    --bg:#0c0e14; --panel:#141822; --ink:#e8ecf4; --muted:#8a93a6;
+    --accent:#5ad1c4; --line:#222838;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  header{padding:22px 24px 8px}
+  h1{font-size:18px;margin:0 0 2px;font-weight:600;letter-spacing:.2px}
+  .sub{color:var(--muted);font-size:12.5px;max-width:720px}
+  .wrap{display:grid;grid-template-columns:340px 1fr;gap:18px;padding:16px 24px 40px}
+  @media(max-width:820px){.wrap{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;
+    color:var(--muted);margin:0 0 12px;font-weight:600}
+  .row{margin:14px 0}
+  label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px}
+  .val{color:var(--ink);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .seg{display:flex;gap:6px;flex-wrap:wrap}
+  .seg button{flex:1;min-width:90px;background:#1b2030;border:1px solid var(--line);
+    color:var(--ink);padding:9px 8px;border-radius:9px;cursor:pointer;font-size:12.5px;
+    transition:.12s}
+  .seg button:hover{border-color:#3a4256}
+  .seg button.on{background:var(--accent);color:#06201d;border-color:var(--accent);font-weight:600}
+  .start{width:100%;padding:13px;border-radius:10px;border:0;cursor:pointer;
+    background:var(--accent);color:#06201d;font-weight:700;font-size:14px;letter-spacing:.2px}
+  .start.stop{background:#e0566a;color:#fff}
+  .lines{display:flex;flex-direction:column;gap:4px}
+  .ln{display:flex;align-items:center;gap:9px;padding:5px 7px;border-radius:7px;cursor:pointer;
+    user-select:none}
+  .ln:hover{background:#1b2030}
+  .ln .sw{width:13px;height:13px;border-radius:3px;flex:0 0 auto}
+  .ln .nm{width:42px;font-weight:600;font-size:12.5px}
+  .ln .meta{color:var(--muted);font-size:11.5px;flex:1}
+  .ln.off{opacity:.32}
+  canvas{width:100%;display:block;border-radius:10px;background:#0a0c12;border:1px solid var(--line)}
+  .meters{display:flex;gap:14px;margin-top:12px;flex-wrap:wrap}
+  .meter{flex:1;min-width:120px}
+  .meter .big{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+  .meter .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.45}
+  .pill{display:inline-block;background:#1b2030;border:1px solid var(--line);
+    border-radius:20px;padding:2px 9px;font-size:11px;color:var(--muted);margin:2px 4px 2px 0}
+  kbd{background:#1b2030;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <h1>AudioMetro — Prototip MVP</h1>
+  <div class="sub">Híbrid (Opció C): cada arribada és un <b>impuls</b> amb el seu gest sonor; cada línia és un
+  <b>oscil·lador de fase</b> a la seva freqüència real de pas; quan dues línies coincideixen, l'impuls es
+  <b>reforça</b>. Tot afinat a una pentatònica perquè sempre soni consonant. Dades simulades — cap connexió a TMB.</div>
+</header>
+
+<div class="wrap">
+  <!-- ───────────── CONTROLS ───────────── -->
+  <div>
+    <div class="panel">
+      <h2>So</h2>
+      <button id="power" class="start">▶ Activa l'àudio</button>
+
+      <div class="row">
+        <label>Gest de l'arribada <span class="hint" style="margin:0">(commutable en viu)</span></label>
+        <div class="seg" id="gesture">
+          <button data-g="neuron" class="on">Neurona</button>
+          <button data-g="pluck">Corda</button>
+          <button data-g="reson">Ressonador</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>Volum mestre · <span class="val" id="volV">−8 dB</span></label>
+        <input id="vol" type="range" min="-40" max="0" value="-8" step="1" />
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:14px">
+      <h2>Sistema</h2>
+      <div class="row">
+        <label>Compressió temporal · <span class="val" id="compV">25×</span>
+          <span class="hint" style="margin:0">(headways reals ÷ N → audibles)</span></label>
+        <input id="comp" type="range" min="6" max="60" value="25" step="1" />
+      </div>
+      <div class="row">
+        <label>Acoblament K (Kuramoto) · <span class="val" id="kV">0.00</span>
+          <span class="hint" style="margin:0">0 = línies independents · alt = se sincronitzen</span></label>
+        <input id="k" type="range" min="0" max="2.5" value="0" step="0.05" />
+      </div>
+      <div class="row">
+        <label>Reforç de sincronia · <span class="val" id="syncV">mitjà</span></label>
+        <input id="sync" type="range" min="0" max="2" value="1" step="0.01" />
+      </div>
+      <div class="hint">Prova decisiva del batec de fase: deixa <kbd>K=0</kbd>, deixa només <b>dues</b> línies actives
+      i escolta com entren i surten de fase. Després apuja <kbd>K</kbd> i sent com es "tanquen" juntes.</div>
+    </div>
+
+    <div class="panel" style="margin-top:14px">
+      <h2>Línies <span class="hint" style="margin:0">(clic = activa/desactiva)</span></h2>
+      <div class="lines" id="lines"></div>
+    </div>
+  </div>
+
+  <!-- ───────────── VISUAL ───────────── -->
+  <div class="panel">
+    <h2>Visualització</h2>
+    <canvas id="cv" width="900" height="420"></canvas>
+    <div class="meters">
+      <div class="meter"><div class="big" id="coh">0.00</div><div class="lbl">Coherència r</div></div>
+      <div class="meter"><div class="big" id="eps">0</div><div class="lbl">Impulsos / s</div></div>
+      <div class="meter"><div class="big" id="voices">0</div><div class="lbl">Veus actives</div></div>
+    </div>
+    <div class="hint">
+      Cada fila és una línia; el punt recorre la seva <b>fase</b> (esquerra→dreta) i destella en cada arribada.
+      Els destells <b>blancs grossos</b> són coincidències reforçades. La barra inferior és la coherència global
+      <i>r</i> (consonància del sistema): com més alta, més brillant sona el conjunt.
+    </div>
+    <div style="margin-top:10px">
+      <span class="pill">pitch → línia (pentatònica)</span>
+      <span class="pill">pan → posició geogràfica</span>
+      <span class="pill">intercanviador → octava greu + ressò</span>
+      <span class="pill">jitter → regularitat de la línia</span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════════
+   AudioMetro · Prototip MVP
+   Objectiu: ESCOLTAR. Validar si el llenguatge sonor enganxa 15 minuts.
+   Tres blocs: (1) cadena d'àudio mestra · (2) tres gestos sonors ·
+               (3) nucli Kuramoto que genera les arribades.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ---------- Escala fixa: A menor pentatònica (sempre consonant) ---------- */
+const PC={C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
+function nf(name,oct){ // freqüència d'una nota ("C",4); afinació estàndard A4=440
+  const midi=(oct+1)*12+PC[name];
+  return 440*Math.pow(2,(midi-69)/12);
+}
+// Assignació línia → nota base (de greu a agut sobre la pentatònica A C D E G)
+// Cada línia de Barcelona, el seu color, headway real aprox. (s) i caràcter rítmic.
+const LINES = [
+  {id:'L1', col:'#d92b2b', note:nf('A',2), head:210, jitter:0.10, auto:false}, // vermell
+  {id:'L2', col:'#7a3b9e', note:nf('C',3), head:240, jitter:0.10, auto:false}, // lila
+  {id:'L3', col:'#2e9e3f', note:nf('D',3), head:180, jitter:0.09, auto:false}, // verd
+  {id:'L4', col:'#f0c020', note:nf('E',3), head:255, jitter:0.11, auto:false}, // groc
+  {id:'L5', col:'#1f6fd0', note:nf('G',3), head:190, jitter:0.08, auto:false}, // blau
+  {id:'L9', col:'#e88020', note:nf('A',3), head:300, jitter:0.02, auto:true},  // taronja (automàtica)
+  {id:'L10',col:'#1aa6b0', note:nf('C',4), head:330, jitter:0.02, auto:true},  // cian (automàtica)
+  {id:'L11',col:'#9bd13a', note:nf('D',4), head:420, jitter:0.025,auto:true},  // verd clar
+];
+// Estacions simulades per línia: pan geogràfic + intercanviadors (hubs)
+LINES.forEach((L,i)=>{
+  const N = 10 + (i%4)*3;
+  L.stations=[];
+  for(let s=0;s<N;s++){
+    const pan = -0.85 + 1.7*(s/(N-1));        // de pol esquerre a dret
+    const hub = (s===Math.floor(N*0.35) || s===Math.floor(N*0.7)); // 2 intercanviadors
+    L.stations.push({pan, hub});
+  }
+  L.theta = Math.random()*2*Math.PI;          // fase inicial aleatòria
+  L.cur = 0;                                   // estació actual (cicla)
+  L.on = true;
+});
+
+/* ───────────────────────── 1 · CADENA MESTRA ───────────────────────── */
+let bus, reverb, masterFilter, limiter, masterVol, ready=false;
+function buildMaster(){
+  limiter      = new Tone.Limiter(-2).toDestination();
+  masterVol    = new Tone.Gain(Tone.dbToGain(-8)).connect(limiter);
+  masterFilter = new Tone.Filter(6000,'lowpass').connect(masterVol); // brillantor ~ coherència
+  reverb       = new Tone.Reverb({decay:5.5, wet:0.32, preDelay:0.02}).connect(masterFilter);
+  bus          = new Tone.Gain(0.9).connect(reverb);
+  ready=true;
+}
+
+/* ───────────────────────── 2 · TRES GESTOS ─────────────────────────
+   Cada gest és una "veu" autònoma creada al moment de l'arribada i
+   alliberada després de la cua. Comparteixen interfície:
+        gest(time, freq, pan, gain, hub)
+   ─────────────────────────────────────────────────────────────────── */
+let activeVoices = 0;
+const MAX_VOICES = 56;            // sostre de seguretat (evita saturació)
+function freeAfter(nodes, time, tail){
+  setTimeout(()=>{ nodes.forEach(n=>{try{n.dispose()}catch(e){}}); activeVoices--; },
+             Math.max(0,(time - Tone.now())+tail)*1000);
+}
+
+/* (A) NEURONA: glissando ascendent breu → impacte → ressò.
+       Com una neurona que dispara. El silenci entre impulsos importa. */
+function gNeuron(time,freq,pan,gain,hub){
+  const p=new Tone.Panner(pan).connect(bus);
+  const amp=new Tone.Gain(0).connect(p);
+  const osc=new Tone.Oscillator(freq*0.5, hub?'sine':'triangle').connect(amp);
+  const tail=hub?1.9:0.95;
+  osc.frequency.setValueAtTime(freq*0.5,time);
+  osc.frequency.exponentialRampToValueAtTime(freq,time+0.055);   // glissando amunt
+  amp.gain.setValueAtTime(0,time);
+  amp.gain.linearRampToValueAtTime(gain,time+0.006);             // impacte
+  amp.gain.exponentialRampToValueAtTime(0.0001,time+tail);       // ressò
+  osc.start(time); osc.stop(time+tail+0.05);
+  freeAfter([osc,amp,p],time,tail+0.3);
+}
+
+/* (B) CORDA PUNTEJADA: Karplus-Strong (Tone.PluckSynth).
+       Hereu de Chen/mta.me: la xarxa com a instrument de corda. */
+function gPluck(time,freq,pan,gain,hub){
+  const p=new Tone.Panner(pan).connect(bus);
+  const ps=new Tone.PluckSynth({
+    attackNoise:hub?1.6:1, dampening:hub?1400:3600, resonance:hub?0.96:0.9
+  }).connect(p);
+  ps.volume.value=Tone.gainToDb(gain*0.9);
+  ps.triggerAttack(freq,time);
+  freeAfter([ps,p],time,2.4);
+}
+
+/* (C) RESSONADOR FÍSIC: excitació de soroll curta → bandpass d'alt Q que ressona.
+       So percussiu-metàl·lic afinat (model físic simplificat). */
+function gReson(time,freq,pan,gain,hub){
+  const p=new Tone.Panner(pan).connect(bus);
+  const amp=new Tone.Gain(gain).connect(p);
+  const filt=new Tone.Filter({type:'bandpass',frequency:freq,Q:hub?26:17}).connect(amp);
+  const noise=new Tone.Noise('white').connect(filt);
+  const tail=hub?2.3:1.15;
+  amp.gain.setValueAtTime(gain,time);
+  amp.gain.exponentialRampToValueAtTime(0.0001,time+tail);
+  noise.start(time); noise.stop(time+0.018);                     // excitació curta
+  freeAfter([noise,filt,amp,p],time,tail+0.3);
+}
+const GESTURES={neuron:gNeuron, pluck:gPluck, reson:gReson};
+let currentGesture='neuron';
+
+/* Accent de sub-greu per a coincidències reforçades (sincronia audible) */
+function accent(time,freq,gain){
+  const amp=new Tone.Gain(0).connect(bus);
+  const osc=new Tone.Oscillator(freq/2,'sine').connect(amp);
+  amp.gain.setValueAtTime(0,time);
+  amp.gain.linearRampToValueAtTime(gain,time+0.004);
+  amp.gain.exponentialRampToValueAtTime(0.0001,time+0.5);
+  osc.start(time); osc.stop(time+0.55);
+  setTimeout(()=>{try{osc.dispose();amp.dispose()}catch(e){}},900);
+}
+
+/* Disparar una arribada (escull estació, calcula pan/pitch/gain, reforça si cal) */
+let lastEmit=[];            // {t, line} recents per detectar coincidències
+let emitCount=0;            // per al comptador impulsos/s
+function emitArrival(L, time){
+  if(activeVoices>=MAX_VOICES) return;
+  const st=L.stations[L.cur]; L.cur=(L.cur+1)%L.stations.length;
+  const hub=st.hub;
+  let freq=L.note*(hub?0.5:1);                       // intercanviador → octava greu
+  let gain=(hub?0.85:0.5);
+  // ¿coincidència amb una altra línia en una finestra curta? → reforç
+  const COINC=0.07*compFactorInv();                  // finestra escala amb compressió
+  let reinforced=false;
+  for(const e of lastEmit){ if(time-e.t < COINC){ reinforced=true; break; } }
+  lastEmit.push({t:time}); if(lastEmit.length>24) lastEmit.shift();
+  if(reinforced){
+    gain*=1.0+0.6*syncAmt;
+    if(syncAmt>0.05) accent(time, L.note, 0.3*syncAmt);
+  }
+  activeVoices++;
+  GESTURES[currentGesture](time, freq, st.pan, gain, hub);
+  emitCount++;
+  // marca per a la visualització
+  L.flash=1; if(reinforced) L.flashBig=1;
+}
+
+/* ───────────────────────── 3 · NUCLI KURAMOTO ─────────────────────────
+   Cada línia és un oscil·lador de fase θ amb freqüència natural ω.
+   Acoblament de camp mitjà:  dθ_i/dt = ω_i + K·r·sin(ψ − θ_i) + soroll(jitter)
+   Quan θ travessa 2π → arribada. r,ψ = paràmetre d'ordre (coherència global).
+   ──────────────────────────────────────────────────────────────────────── */
+let comp=25, K=0, syncAmt=1;
+function compFactorInv(){ return 25/comp; }
+function omega(L){ return 2*Math.PI / (L.head/comp); }  // rad/s a temps comprimit
+
+let r=0, psi=0;
+function orderParameter(){
+  let x=0,y=0,n=0;
+  for(const L of LINES){ if(!L.on) continue; x+=Math.cos(L.theta); y+=Math.sin(L.theta); n++; }
+  if(n===0){r=0;return;}
+  x/=n; y/=n; r=Math.sqrt(x*x+y*y); psi=Math.atan2(y,x);
+}
+
+let lastT=0;
+function step(now){
+  const dt=Math.min(0.05,(now-lastT)/1000)||0; lastT=now;
+  if(ready && running){
+    orderParameter();
+    for(const L of LINES){
+      if(!L.on) continue;
+      const w=omega(L);
+      const noise=(Math.random()*2-1)*L.jitter*w; // jitter: línies manuals trontollen més
+      let dtheta=(w + K*r*Math.sin(psi-L.theta) + noise)*dt;
+      const prev=L.theta; L.theta+=dtheta;
+      if(L.theta>=2*Math.PI){
+        L.theta-=2*Math.PI;
+        // temps exacte (interpolat) de l'encreuament, amb petit lookahead
+        const frac=(2*Math.PI-prev)/Math.max(1e-6,dtheta);
+        const t=Tone.now()+0.03+ (1-frac)*dt;
+        emitArrival(L,t);
+      }
+    }
+    // coherència → brillantor i ambient del mestre
+    if(masterFilter) masterFilter.frequency.rampTo(1600+9000*r, 0.3);
+    if(reverb) reverb.wet.rampTo(0.18+0.22*(1-r), 0.5); // menys coherent → més difús
+  }
+  draw();
+  requestAnimationFrame(step);
+}
+
+/* ───────────────────────── Visualització ───────────────────────── */
+const cv=document.getElementById('cv'), cx=cv.getContext('2d');
+let epsTimer=0, epsShown=0;
+function draw(){
+  const W=cv.width,H=cv.height;
+  cx.clearRect(0,0,W,H);
+  const top=14, rowH=(H-70)/LINES.length;
+  LINES.forEach((L,i)=>{
+    const y=top+i*rowH+rowH/2;
+    // carril
+    cx.strokeStyle='#1a1f2c'; cx.lineWidth=1;
+    cx.beginPath(); cx.moveTo(60,y); cx.lineTo(W-16,y); cx.stroke();
+    // etiqueta
+    cx.fillStyle=L.on?L.col:'#3a4256'; cx.font='600 12px sans-serif';
+    cx.fillText(L.id,16,y+4);
+    // punt de fase
+    const x=60+(W-76)*(L.theta/(2*Math.PI));
+    let rad=4; let alpha=L.on?0.5:0.15;
+    if(L.flash){rad=8+10*L.flash; alpha=1; L.flash*=0.82; if(L.flash<0.05)L.flash=0;}
+    cx.globalAlpha=alpha; cx.fillStyle=L.col;
+    cx.beginPath(); cx.arc(x,y,rad,0,7); cx.fill();
+    if(L.flashBig){
+      cx.globalAlpha=L.flashBig; cx.strokeStyle='#fff'; cx.lineWidth=2;
+      cx.beginPath(); cx.arc(x,y,rad+8,0,7); cx.stroke();
+      L.flashBig*=0.85; if(L.flashBig<0.05)L.flashBig=0;
+    }
+    cx.globalAlpha=1;
+  });
+  // barra de coherència
+  const by=H-34;
+  cx.fillStyle='#11151f'; cx.fillRect(60,by,W-76,16);
+  cx.fillStyle='#5ad1c4'; cx.fillRect(60,by,(W-76)*r,16);
+  cx.fillStyle='#8a93a6'; cx.font='11px sans-serif';
+  cx.fillText('coherència r',16,by+12);
+
+  document.getElementById('coh').textContent=r.toFixed(2);
+  document.getElementById('voices').textContent=activeVoices;
+}
+// impulsos/s
+setInterval(()=>{ document.getElementById('eps').textContent=emitCount; emitCount=0; },1000);
+
+/* ───────────────────────── UI ───────────────────────── */
+let running=false;
+const powerBtn=document.getElementById('power');
+powerBtn.onclick=async()=>{
+  if(!running){
+    await Tone.start();              // desbloqueja l'àudio (política autoplay)
+    if(!ready) buildMaster();
+    running=true; lastT=performance.now();
+    powerBtn.textContent='■ Atura'; powerBtn.classList.add('stop');
+  } else {
+    running=false;
+    powerBtn.textContent='▶ Activa l\'àudio'; powerBtn.classList.remove('stop');
+  }
+};
+// gest
+document.getElementById('gesture').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b)return;
+  currentGesture=b.dataset.g;
+  [...e.currentTarget.children].forEach(c=>c.classList.toggle('on',c===b));
+});
+// sliders
+const bind=(id,fn,fmt)=>{const el=document.getElementById(id);
+  el.oninput=()=>{fn(parseFloat(el.value)); if(fmt)document.getElementById(id+'V').textContent=fmt(el.value);};};
+bind('vol',v=>{if(masterVol)masterVol.gain.rampTo(Tone.dbToGain(v),0.1);},v=>`${v} dB`);
+bind('comp',v=>{comp=v;},v=>`${v}×`);
+bind('k',v=>{K=v;},v=>parseFloat(v).toFixed(2));
+bind('sync',v=>{syncAmt=v;},v=>{const n=+v;return n<0.66?'baix':n<1.33?'mitjà':'alt';});
+// línies
+const lc=document.getElementById('lines');
+LINES.forEach((L,i)=>{
+  const d=document.createElement('div'); d.className='ln'; d.dataset.i=i;
+  d.innerHTML=`<span class="sw" style="background:${L.col}"></span>
+    <span class="nm" style="color:${L.col}">${L.id}</span>
+    <span class="meta">${Math.round(L.head/60*10)/10} min · ${L.auto?'automàtica (regular)':'manual (jitter)'}</span>`;
+  d.onclick=()=>{L.on=!L.on; d.classList.toggle('off',!L.on);};
+  lc.appendChild(d);
+});
+
+requestAnimationFrame(step);
+</script>
+</body>
+</html>

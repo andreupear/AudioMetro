@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AudioMetro — híbrid (mapa oficial + editor de disposició)</title>
+<script src="network-data.js"></script>
+<script src="supabase-config.js" onerror="window.__noSupa=1"></script>
+<script src="imetro-data.js" onerror="window.__noImetro=1"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<style>
+  :root{--bg:#070910;--panel:#121622;--ink:#e8ecf4;--muted:#8a93a6;--accent:#5ad1c4;--line:#222838}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  header{padding:16px 22px 4px}
+  h1{font-size:17px;margin:0;font-weight:600}
+  .sub{color:var(--muted);font-size:12.5px;max-width:820px;margin-top:2px}
+  .wrap{display:grid;grid-template-columns:290px 1fr;gap:16px;padding:12px 22px 30px}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .panel h2{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 10px;font-weight:600}
+  .row{margin:11px 0}
+  label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:5px}
+  .val{color:var(--ink);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .start{width:100%;padding:12px;border-radius:10px;border:0;cursor:pointer;background:var(--accent);color:#06201d;font-weight:700;font-size:14px}
+  .start.stop{background:#e0566a;color:#fff}
+  .chk{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink);cursor:pointer;margin:7px 0}
+  .chk input{accent-color:var(--accent);width:15px;height:15px}
+  .btn{flex:1;padding:9px;border-radius:8px;border:1px solid var(--line);background:#1b2030;color:var(--ink);cursor:pointer;font-size:12px}
+  .btn:hover{border-color:#3a4256}
+  .btn.save{background:var(--accent);color:#06201d;font-weight:700;border-color:var(--accent)}
+  .btnrow{display:flex;gap:6px;margin-top:6px}
+  .lines{display:flex;flex-direction:column;gap:2px}
+  .ln{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;cursor:pointer;user-select:none}
+  .ln:hover{background:#1b2030}
+  .ln .sw{width:12px;height:12px;border-radius:3px;flex:0 0 auto}
+  .ln .nm{width:42px;font-weight:700;font-size:11.5px}
+  .ln.off{opacity:.32}
+  .stage{position:relative;background:#05060a;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  svg{width:100%;display:block;touch-action:none}
+  .zoom{position:absolute;top:10px;right:10px;display:flex;flex-direction:column;gap:6px;z-index:5}
+  .zoom button{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:rgba(18,22,34,.92);color:var(--ink);font-size:18px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center}
+  .zoom button:hover{border-color:var(--accent);color:var(--accent)}
+  .meters{display:flex;gap:16px;padding:9px 14px;border-top:1px solid var(--line);flex-wrap:wrap}
+  .meter .big{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
+  .meter .lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.45}
+  kbd{background:#1b2030;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
+  .edit{color:#ffd166;font-weight:600}
+  #status{font-size:11px;color:var(--accent);margin-top:7px;min-height:14px}
+  .hrow{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+  .admin{background:#1b2030;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px;white-space:nowrap}
+  .admin:hover{border-color:var(--accent);color:var(--accent)}
+  .admin.on{background:var(--accent);color:#06201d;border-color:var(--accent);font-weight:700}
+  #logbox{display:flex;flex-direction:column;gap:5px;max-height:300px;overflow:auto;padding-right:2px}
+  .notif{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.05);border:1px solid var(--line);
+    border-radius:11px;padding:6px 9px;animation:notifIn .18s ease}
+  @keyframes notifIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  .notif .ic{width:24px;height:24px;border-radius:7px;flex:0 0 auto;display:flex;align-items:center;
+    justify-content:center;font-size:9px;font-weight:800;letter-spacing:-.02em}
+  .notif .body{display:flex;flex-direction:column;min-width:0;flex:1;line-height:1.25}
+  .notif .t1{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .notif .t2{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .notif .tm{font-size:10px;color:var(--muted);flex:0 0 auto;align-self:flex-start;font-variant-numeric:tabular-nums}
+  #nodepop{position:absolute;display:none;min-width:175px;max-width:230px;background:rgba(16,19,28,.97);
+    border:1px solid var(--line);border-radius:11px;padding:9px 10px;z-index:8;box-shadow:0 8px 26px rgba(0,0,0,.55)}
+  .nphead{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;margin-bottom:7px}
+  #npclose{cursor:pointer;color:var(--muted);font-size:12px}
+  .nprow{display:flex;align-items:center;gap:7px;padding:3px 0;font-size:12px}
+  .nprow.muted{color:var(--muted)}
+  .npic{width:24px;height:18px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:8.5px;font-weight:800;flex:0 0 auto}
+  .npdest{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .npcd{font-variant-numeric:tabular-nums;font-weight:700;color:var(--accent);flex:0 0 auto}
+</style>
+</head>
+<body>
+<header>
+  <div class="hrow">
+    <div>
+      <h1>AudioMetro</h1>
+      <div class="sub">Sonificació en temps real del metro de Barcelona.<span class="dev-only"> Mode admin actiu — menús de desenvolupament visibles.</span></div>
+    </div>
+    <button id="adminBtn" class="admin">Admin</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div>
+    <div class="panel">
+      <h2>So</h2>
+      <button id="power" class="start">▶ Activa l'àudio</button>
+      <div class="row"><label>Volum · <span class="val" id="volV">−9 dB</span></label>
+        <input id="vol" type="range" min="-40" max="0" value="-9" /></div>
+    </div>
+    <div class="panel dev-only" style="margin-top:12px">
+      <h2>Disposició</h2>
+      <label class="chk"><input type="checkbox" id="cal"> Mode edició (arrossega estacions)</label>
+      <div class="btnrow">
+        <button class="btn save" id="save">💾 Guardar</button>
+        <button class="btn" id="reset">Restablir</button>
+      </div>
+      <div class="btnrow">
+        <button class="btn" id="export">Exportar JSON</button>
+        <button class="btn" id="import">Importar JSON</button>
+      </div>
+      <input type="file" id="file" accept="application/json" style="display:none" />
+      <div id="status"></div>
+      <div class="note">El primer cop, les estacions parteixen del calibratge automàtic (TPS) sobre 12 punts.
+      Ajusta-les i desa. <kbd>Restablir</kbd> torna a l'automàtic.</div>
+    </div>
+    <div class="panel dev-only" style="margin-top:12px">
+      <h2>Vista</h2>
+      <label class="chk"><input type="checkbox" id="bg" checked> Mapa oficial de fons</label>
+      <label class="chk"><input type="checkbox" id="tps" checked> Calibratge automàtic (TPS)</label>
+      <label class="chk"><input type="checkbox" id="names"> Mostrar noms de les estacions</label>
+      <div class="row"><label>Opacitat del fons · <span class="val" id="bgoV">85%</span></label>
+        <input id="bgo" type="range" min="0" max="100" value="85" /></div>
+      <div class="row"><label>Opacitat de l'overlay · <span class="val" id="ovoV">100%</span></label>
+        <input id="ovo" type="range" min="20" max="100" value="100" /></div>
+    </div>
+    <div class="panel dev-only" style="margin-top:12px">
+      <h2>Dades reals (TMB)</h2>
+      <div class="row"><label>Velocitat (demostració) · <span class="val" id="speedV">1×</span></label>
+        <input id="speed" type="range" min="1" max="30" value="1" /></div>
+      <div id="datastatus" class="note">Connectant amb les dades…</div>
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h2>Línies</h2>
+      <div class="lines" id="lines"></div>
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h2>Registre d'arribades</h2>
+      <div id="logbox"></div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <svg id="map" viewBox="0 0 1000 674" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="zoom dev-only">
+      <button id="zin" title="Apropa">+</button>
+      <button id="zout" title="Allunya">−</button>
+      <button id="zfit" title="Tot el mapa">⤢</button>
+    </div>
+    <div class="meters dev-only">
+      <div class="meter"><div class="big" id="coh">0</div><div class="lbl">Arribades/min</div></div>
+      <div class="meter"><div class="big" id="eps">0</div><div class="lbl">Impulsos / s</div></div>
+      <div class="meter"><div class="big" id="nst">0</div><div class="lbl">Estacions</div></div>
+      <div class="meter"><div class="big" id="plc">0</div><div class="lbl">Ajustades</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ════════ AudioMetro · híbrid + editor de disposició ════════ */
+const VBW=1000; let VBH=674; const LSKEY='audiometro_layout_v1';
+// Imatge de fons (la que té el calibratge ja fet). Substitueix el fitxer per canviar el mapa.
+const IMG_SRC='mapa-oficial.jpg';
+const NET = window.NETWORK;
+
+/* punts de calibratge inicials (només per al TPS automàtic de partida) */
+let CP = [
+  {name:'Hospital de Bellvitge',fx:0.13,fy:0.55},{name:'Aeroport T1',fx:0.17,fy:0.74},
+  {name:'Zona Universitària',fx:0.31,fy:0.30},{name:'Sants Estació',fx:0.365,fy:0.435},
+  {name:'Diagonal',fx:0.50,fy:0.45},{name:'Sagrada Família',fx:0.64,fy:0.47},
+  {name:'Vall d\'Hebron',fx:0.50,fy:0.13},{name:'Trinitat Nova',fx:0.70,fy:0.19},
+  {name:'Verdaguer',fx:0.58,fy:0.46},{name:'Maragall',fx:0.69,fy:0.31},
+  {name:'La Sagrera',fx:0.62,fy:0.33},{name:'Badalona Pompeu Fabra',fx:0.82,fy:0.42},
+];
+
+/* LAY = posicions manuals desades (name → {fx,fy}). Tenen prioritat sobre el TPS. */
+let LAY = {};
+try{ const sv=localStorage.getItem(LSKEY); if(sv) LAY=JSON.parse(sv); }catch(e){}
+
+/* ---- escala + config per línia ---- */
+const PC={C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
+const nf=(n,o)=>440*Math.pow(2,(((o+1)*12+PC[n])-69)/12);
+const SCALE=[['A',2],['C',3],['D',3],['E',3],['G',3],['A',3],['C',4],['D',4],['E',4],['G',4],['A',4]];
+const LCFG={L1:{n:['A',2],h:210,j:.10,a:0},L2:{n:['C',3],h:240,j:.10,a:0},L3:{n:['D',3],h:180,j:.09,a:0},
+ L4:{n:['E',3],h:255,j:.11,a:0},L5:{n:['G',3],h:195,j:.08,a:0},L9N:{n:['A',3],h:420,j:.02,a:1},
+ L9S:{n:['C',4],h:300,j:.02,a:1},L10N:{n:['D',4],h:480,j:.02,a:1},L10S:{n:['E',4],h:360,j:.02,a:1},
+ L11:{n:['G',4],h:600,j:.02,a:1},FM:{n:['A',4],h:240,j:.03,a:1}};
+
+/* ORDRE REAL de les estacions per línia (autoritatiu: corregeix l'ordre i descarta extres) */
+const ORDER={
+ L1:["Hospital de Bellvitge","Bellvitge","Av. Carrilet","Rambla Just Oliveras","Can Serra","Florida","Torrassa","Santa Eulàlia","Mercat Nou","Plaça de Sants","Hostafrancs","Espanya","Rocafort","Urgell","Universitat","Catalunya","Urquinaona","Arc de Triomf","Marina","Glòries","Clot","Navas","La Sagrera","Fabra i Puig","Sant Andreu","Torras i Bages","Trinitat Vella","Baró de Viver","Santa Coloma","Fondo"],
+ L2:["Paral·lel","Sant Antoni","Universitat","Passeig de Gràcia","Tetuan","Monumental","Sagrada Família","Encants","Clot","Bac de Roda","Sant Martí","La Pau","Verneda","Artigues | Sant Adrià","Sant Roc","Gorg","Pep Ventura","Badalona Pompeu Fabra"],
+ L3:["Zona Universitària","Palau Reial","Maria Cristina","Les Corts","Plaça del Centre","Sants Estació","Tarragona","Espanya","Poble Sec","Paral·lel","Drassanes","Liceu","Catalunya","Passeig de Gràcia","Diagonal","Fontana","Lesseps","Vallcarca","Penitents","Vall d'Hebron","Montbau","Mundet","Valldaura","Canyelles","Roquetes","Trinitat Nova"],
+ L4:["Trinitat Nova","Via Júlia","Llucmajor","Maragall","Guinardó | Hospital de Sant Pau","Alfons X","Joanic","Verdaguer","Girona","Passeig de Gràcia","Urquinaona","Jaume I","Barceloneta","Ciutadella | Vila Olímpica","Bogatell","Llacuna","Poblenou","Selva de Mar","El Maresme | Fòrum","Besòs Mar","Besòs","La Pau"],
+ L5:["Cornellà Centre","Gavarra","Sant Ildefons","Can Boixeres","Can Vidalet","Pubilla Cases","Ernest Lluch","Collblanc","Badal","Plaça de Sants","Sants Estació","Entença","Hospital Clínic","Diagonal","Verdaguer","Sagrada Família","Sant Pau | Dos de Maig","Camp de l'Arpa","La Sagrera","Congrés","Maragall","Virrei Amat","Vilapicina","Horta","El Carmel","El Coll | La Teixonera","Vall d'Hebron"],
+ L9N:["La Sagrera","Onze de Setembre","Bon Pastor","Can Peixauet","Santa Rosa","Fondo","Església Major","Singuerlín","Can Zam"],
+ L9S:["Aeroport T1","Aeroport T2","Mas Blau","Parc Nou","Cèntric","El Prat Estació","Les Moreres","Mercabarna","Parc Logístic","Fira","Europa | Fira","Can Tries | Gornal","Torrassa","Collblanc","Zona Universitària"],
+ L10N:["La Sagrera","Onze de Setembre","Bon Pastor","Llefià","La Salut","Gorg"],
+ L10S:["Collblanc","Torrassa","Can Tries | Gornal","Provençana","Ciutat de la Justícia","Foneria","Foc","Zona Franca","Port Comercial | La Factoria","Ecoparc","ZAL | Riu Vell"],
+ L11:["Trinitat Nova","Casa de l'Aigua","Torre Baró | Vallbona","Ciutat Meridiana","Can Cuiàs"],
+ FM:["Paral·lel","Parc de Montjuïc"],
+};
+
+/* ---- ordenació geomètrica ---- */
+const d2=(a,b)=>{const dx=a.lon-b.lon,dy=a.lat-b.lat;return dx*dx+dy*dy;};
+function orderByGeo(arr){if(arr.length<3)return arr;let A=0,bst=-1;
+  for(let i=0;i<arr.length;i++)for(let j=i+1;j<arr.length;j++){const d=d2(arr[i],arr[j]);if(d>bst){bst=d;A=i;}}
+  const u=new Array(arr.length).fill(0);u[A]=1;const p=[arr[A]];let c=arr[A];
+  while(p.length<arr.length){let nn=-1,nd=Infinity;for(let i=0;i<arr.length;i++){if(u[i])continue;const d=d2(c,arr[i]);if(d<nd){nd=d;nn=i;}}u[nn]=1;p.push(arr[nn]);c=arr[nn];}
+  return p;}
+
+/* ---- TPS ---- */
+const Uf=r2=>r2<1e-12?0:r2*Math.log(Math.sqrt(r2));
+function solveLin(A,b){const n=b.length,M=A.map((r,i)=>r.concat(b[i]));
+  for(let c=0;c<n;c++){let p=c;for(let r=c+1;r<n;r++)if(Math.abs(M[r][c])>Math.abs(M[p][c]))p=r;[M[c],M[p]]=[M[p],M[c]];
+    const pv=M[c][c]||1e-9;for(let r=0;r<n;r++){if(r===c)continue;const f=M[r][c]/pv;for(let k=c;k<=n;k++)M[r][k]-=f*M[c][k];}}
+  return M.map((r,i)=>r[n]/(M[i][i]||1e-9));}
+function makeTPS(src,val){const n=src.length,m=n+3,A=Array.from({length:m},()=>new Array(m).fill(0)),b=new Array(m).fill(0);
+  for(let i=0;i<n;i++){for(let j=0;j<n;j++){const dx=src[i][0]-src[j][0],dy=src[i][1]-src[j][1];A[i][j]=Uf(dx*dx+dy*dy);}
+    A[i][n]=1;A[i][n+1]=src[i][0];A[i][n+2]=src[i][1];A[n][i]=1;A[n+1][i]=src[i][0];A[n+2][i]=src[i][1];b[i]=val[i];}
+  const w=solveLin(A,b);
+  return (x,y)=>{let s=w[n]+w[n+1]*x+w[n+2]*y;for(let i=0;i<n;i++){const dx=x-src[i][0],dy=y-src[i][1];s+=w[i]*Uf(dx*dx+dy*dy);}return s;};}
+
+/* ---- xarxa ---- */
+let LINES=[],STA={},BYID={},BND,kZoom=1;
+function buildNet(){
+  STA={};LINES=[];BYID={};
+  NET.lines.forEach((L,i)=>{
+    const cfg=LCFG[L.id]||{n:SCALE[i%SCALE.length],h:240,j:.06,a:1};
+    const o={id:L.id,color:L.color,note:nf(cfg.n[0],cfg.n[1]),head:cfg.h,jitter:cfg.j,auto:cfg.a,
+             on:true,seq:[]};
+    const ord=ORDER[L.id];
+    const names=ord?ord.filter(n=>NET.stations[n]):L.stations;
+    names.forEach(nm=>{const src=NET.stations[nm];if(!src)return;let s=STA[nm];
+      if(!s){s={name:nm,lat:src.lat,lon:src.lon,inter:!!src.interchange,lines:src.lines||[],flash:0};STA[nm]=s;}
+      o.seq.push(s);});
+    if(!ord)o.seq=orderByGeo(o.seq);   // ordre real si el tenim; si no, geomètric
+    LINES.push(o);BYID[o.id]=o;
+  });
+  const all=Object.values(STA),la=all.map(s=>s.lat),lo=all.map(s=>s.lon);
+  BND={minLa:Math.min(...la),maxLa:Math.max(...la),minLo:Math.min(...lo),maxLo:Math.max(...lo)};
+  for(const s of all){s.nx=(s.lon-BND.minLo)/(BND.maxLo-BND.minLo);s.ny=(BND.maxLa-s.lat)/(BND.maxLa-BND.minLa);}
+}
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+let warpX=null,warpY=null,useTPS=true;
+function computeWarp(){const pts=CP.map(c=>({c,s:STA[c.name]})).filter(o=>o.s);
+  if(pts.length<4){warpX=warpY=null;return;}const src=pts.map(o=>[o.s.nx,o.s.ny]);
+  warpX=makeTPS(src,pts.map(o=>o.c.fx*VBW));warpY=makeTPS(src,pts.map(o=>o.c.fy*VBH));}
+const MG=30;
+function place(s){
+  const ov=LAY[s.name];
+  if(ov){s.x=ov.fx*VBW;s.y=ov.fy*VBH;}
+  else if(useTPS&&warpX){s.x=clamp(warpX(s.nx,s.ny),0,VBW);s.y=clamp(warpY(s.nx,s.ny),0,VBH);}
+  else{s.x=MG+s.nx*(VBW-2*MG);s.y=MG+s.ny*(VBH-2*MG);}
+  s.pan=clamp((s.x/VBW)*2-1,-1,1);
+}
+
+/* ---- render ---- */
+const svg=document.getElementById('map'),NS='http://www.w3.org/2000/svg';
+const E=(t,a)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e;};
+let bgImg,overlayG,labelsG;
+function render(){
+  svg.innerHTML='';
+  bgImg=E('image',{href:IMG_SRC,'xlink:href':IMG_SRC,x:0,y:0,width:VBW,height:VBH,opacity:0.85,preserveAspectRatio:'xMidYMid meet'});
+  svg.appendChild(bgImg);
+  overlayG=E('g',{});svg.appendChild(overlayG);
+  labelsG=E('g',{'pointer-events':'none'});labelsG.setAttribute('display','none');
+  for(const L of LINES){if(L.seq.length<2)continue;
+    L.pathEl=E('path',{fill:'none',stroke:L.color,'stroke-width':2.6,'stroke-linejoin':'round','stroke-linecap':'round','stroke-opacity':0.85});
+    overlayG.appendChild(L.pathEl);}
+  for(const s of Object.values(STA)){const base=s.inter?4.4:2.6;s.base=base;
+    s.wave=E('circle',{r:base,fill:'none',stroke:'#fff','stroke-width':1.4,'stroke-opacity':0});
+    s.halo=E('circle',{r:base,fill:'#fff','fill-opacity':0});
+    s.core=E('circle',{r:base,fill:s.inter?'#10131c':'#161a24',stroke:s.inter?'#fff':colorOf(s),'stroke-width':s.inter?1.8:1.3});
+    s.hit=E('circle',{r:7,fill:'transparent','pointer-events':'all'});
+    const tt=E('title',{});tt.textContent=s.name;s.hit.appendChild(tt);
+    overlayG.appendChild(s.wave);overlayG.appendChild(s.halo);overlayG.appendChild(s.core);overlayG.appendChild(s.hit);
+    s.label=E('text',{'font-size':8,'paint-order':'stroke',stroke:'#000','stroke-width':2.4,'stroke-opacity':0.78,fill:s.inter?'#ffd166':'#fff','font-weight':s.inter?700:500});
+    s.label.textContent=s.name;labelsG.appendChild(s.label);
+    s.hit.addEventListener('pointerdown',ev=>startDrag(ev,s));
+    s.hit.addEventListener('click',()=>{if(!didDrag)openNode(s);didDrag=false;});
+  }
+  trainDots=[]; trainsG=E('g',{'pointer-events':'none'}); svg.appendChild(trainsG);
+  svg.appendChild(labelsG);
+  document.getElementById('nst').textContent=Object.keys(STA).length;
+  layout();updateStatus();updateLabelScale();
+}
+const colorOf=s=>{const L=BYID[s.lines[0]];return L?L.color:'#999';};
+function setEls(s){for(const el of [s.wave,s.halo,s.core,s.hit]){el.setAttribute('cx',s.x.toFixed(1));el.setAttribute('cy',s.y.toFixed(1));}
+  if(s.label){s.label.setAttribute('x',(s.x+s.base+3*kZoom).toFixed(1));s.label.setAttribute('y',(s.y+3*kZoom).toFixed(1));}}
+function updateLabelScale(){kZoom=vb.w/VBW;const fs=(8*kZoom).toFixed(2),sw=(2.4*kZoom).toFixed(2);
+  for(const s of Object.values(STA)){if(!s.label)continue;
+    s.label.setAttribute('font-size',fs);s.label.setAttribute('stroke-width',sw);
+    s.label.setAttribute('x',(s.x+s.base+3*kZoom).toFixed(1));s.label.setAttribute('y',(s.y+3*kZoom).toFixed(1));}}
+function setPath(L){if(L.pathEl)L.pathEl.setAttribute('d','M'+L.seq.map(s=>`${s.x.toFixed(1)} ${s.y.toFixed(1)}`).join(' L '));}
+function layout(){for(const s of Object.values(STA)){place(s);setEls(s);}for(const L of LINES)setPath(L);}
+function fitToImage(src){  // ajusta el viewBox a l'aspecte real de la imatge (qualsevol PNG substituïble)
+  const probe=new Image();
+  probe.onload=()=>{ if(!probe.naturalWidth)return;
+    VBH=Math.round(VBW*probe.naturalHeight/probe.naturalWidth);
+    svg.setAttribute('viewBox',`0 0 ${VBW} ${VBH}`);
+    if(bgImg)bgImg.setAttribute('height',VBH);
+    vb={x:0,y:0,w:VBW,h:VBH};
+    computeWarp(); layout();
+  };
+  probe.src=src;
+}
+
+/* ---- arrossegar estacions ---- */
+let editOn=false,dragS=null;
+function toVB(ev){const pt=svg.createSVGPoint();pt.x=ev.clientX;pt.y=ev.clientY;const p=pt.matrixTransform(svg.getScreenCTM().inverse());return[p.x,p.y];}
+function startDrag(ev,s){if(!editOn)return;ev.preventDefault();ev.stopPropagation();dragS=s;svg.setPointerCapture(ev.pointerId);}
+
+/* ---- zoom + desplaçament (viewBox) ---- */
+let vb={x:0,y:0,w:VBW,h:VBH};
+function applyVB(){svg.setAttribute('viewBox',`${vb.x.toFixed(2)} ${vb.y.toFixed(2)} ${vb.w.toFixed(2)} ${vb.h.toFixed(2)}`);}
+function clampPan(){vb.x=Math.max(0,Math.min(VBW-vb.w,vb.x));vb.y=Math.max(0,Math.min(VBH-vb.h,vb.y));}
+function zoomBy(f,cx,cy){cx=cx==null?vb.x+vb.w/2:cx;cy=cy==null?vb.y+vb.h/2:cy;
+  let nw=vb.w*f,nh=vb.h*f;const minW=VBW*0.12,minH=VBH*0.12;
+  if(nw>VBW){nw=VBW;nh=VBH;}if(nw<minW){nw=minW;nh=minH;}
+  vb.x=cx-(cx-vb.x)*(nw/vb.w);vb.y=cy-(cy-vb.y)*(nh/vb.h);vb.w=nw;vb.h=nh;clampPan();applyVB();updateLabelScale();}
+
+let panning=false,panStart=null;
+svg.addEventListener('pointerdown',ev=>{if(dragS)return;closeNode();panning=true;panStart={mx:ev.clientX,my:ev.clientY,vx:vb.x,vy:vb.y};svg.setPointerCapture(ev.pointerId);svg.style.cursor='grabbing';});
+svg.addEventListener('pointermove',ev=>{
+  if(dragS){didDrag=true;const[x,y]=toVB(ev);LAY[dragS.name]={fx:clamp(x/VBW,0,1),fy:clamp(y/VBH,0,1)};
+    place(dragS);setEls(dragS);for(const id of dragS.lines){const L=BYID[id];if(L)setPath(L);}updateStatus();return;}
+  if(panning){const rect=svg.getBoundingClientRect();
+    vb.x=panStart.vx-(ev.clientX-panStart.mx)*(vb.w/rect.width);
+    vb.y=panStart.vy-(ev.clientY-panStart.my)*(vb.h/rect.height);clampPan();applyVB();}
+});
+function endPointer(){dragS=null;panning=false;svg.style.cursor=editOn?'grab':'default';}
+svg.addEventListener('pointerup',endPointer);
+svg.addEventListener('pointercancel',endPointer);
+svg.addEventListener('wheel',ev=>{ev.preventDefault();const[cx,cy]=toVB(ev);zoomBy(ev.deltaY<0?0.85:1.18,cx,cy);},{passive:false});
+document.getElementById('zin').onclick=()=>zoomBy(0.8);
+document.getElementById('zout').onclick=()=>zoomBy(1.25);
+document.getElementById('zfit').onclick=()=>{vb={x:0,y:0,w:VBW,h:VBH};applyVB();updateLabelScale();};
+function setEditMode(on){editOn=on;
+  for(const s of Object.values(STA)){
+    s.hit.setAttribute('pointer-events','all');
+    s.hit.setAttribute('r',on?7:7);
+    s.core.setAttribute('stroke-width',on?(s.inter?2.4:2):(s.inter?1.8:1.3));
+  }
+  svg.style.cursor=on?'grab':'default';
+}
+function updateStatus(){document.getElementById('plc').textContent=Object.keys(LAY).length;}
+
+/* ---- desar / restablir / exportar / importar ---- */
+function snapshotAll(){ // congela la disposició actual de TOTES les estacions
+  for(const s of Object.values(STA)){place(s);LAY[s.name]={fx:+(s.x/VBW).toFixed(5),fy:+(s.y/VBH).toFixed(5)};}
+}
+function flash(msg){const el=document.getElementById('status');el.textContent=msg;setTimeout(()=>{if(el.textContent===msg)el.textContent='';},2600);}
+document.getElementById('save').onclick=()=>{snapshotAll();
+  try{localStorage.setItem(LSKEY,JSON.stringify(LAY));flash('Disposició desada ('+Object.keys(LAY).length+' estacions).');}
+  catch(e){flash('No s\'ha pogut desar: '+e.message);}
+  updateStatus();layout();};
+document.getElementById('reset').onclick=()=>{LAY={};try{localStorage.removeItem(LSKEY);}catch(e){}
+  computeWarp();layout();updateStatus();flash('Restablert al calibratge automàtic.');};
+document.getElementById('export').onclick=()=>{snapshotAll();const blob=new Blob([JSON.stringify(LAY,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='disposicio.json';a.click();flash('Exportat disposicio.json');};
+document.getElementById('import').onclick=()=>document.getElementById('file').click();
+document.getElementById('file').onchange=ev=>{const f=ev.target.files[0];if(!f)return;const rd=new FileReader();
+  rd.onload=()=>{try{LAY=JSON.parse(rd.result);layout();updateStatus();flash('Importat ('+Object.keys(LAY).length+').');}catch(e){flash('JSON invàlid.');}};rd.readAsText(f);};
+
+/* ---- àudio (gest NEURONA) ---- */
+let bus,reverb,mFilt,mVol,lim,ready=false;
+function master(){lim=new Tone.Limiter(-2).toDestination();mVol=new Tone.Gain(Tone.dbToGain(-9)).connect(lim);
+  mFilt=new Tone.Filter(6000,'lowpass').connect(mVol);reverb=new Tone.Reverb({decay:5.5,wet:0.32}).connect(mFilt);bus=new Tone.Gain(0.9).connect(reverb);ready=true;}
+let voices=0;const MAXV=64;
+/* dimensions: bright (brillantor/atac), det (cents), durK (durada), harm (0..1 → harmònics, per posició a la línia) */
+function neuron(t,f,pan,g,hub,bright,det,durK,harm){if(voices>=MAXV)return;voices++;
+  f*=Math.pow(2,(det||0)/1200);
+  const p=new Tone.Panner(pan).connect(bus);
+  const flt=new Tone.Filter(700+(bright==null?0.5:bright)*7000,'lowpass').connect(p);
+  const amp=new Tone.Gain(0).connect(flt);
+  const partials=1+Math.round((harm==null?0.3:harm)*7);   // inici de línia → ~sinus; final de línia → ric en harmònics
+  const osc=new Tone.Oscillator({frequency:f*0.5,type:'sawtooth',partialCount:partials}).connect(amp);
+  const tail=(hub?1.9:0.95)*(durK||1);
+  osc.frequency.setValueAtTime(f*0.5,t);osc.frequency.exponentialRampToValueAtTime(f,t+0.055);
+  amp.gain.setValueAtTime(0,t);amp.gain.linearRampToValueAtTime(g,t+0.006);amp.gain.exponentialRampToValueAtTime(0.0001,t+tail);
+  osc.start(t);osc.stop(t+tail+0.05);
+  setTimeout(()=>{try{osc.dispose();amp.dispose();flt.dispose();p.dispose();}catch(e){}voices--;},Math.max(0,(t-Tone.now())+tail+0.4)*1000);}
+function accent(t,f,g){const amp=new Tone.Gain(0).connect(bus),osc=new Tone.Oscillator(f/2,'sine').connect(amp);
+  amp.gain.setValueAtTime(0,t);amp.gain.linearRampToValueAtTime(g,t+0.004);amp.gain.exponentialRampToValueAtTime(0.0001,t+0.5);
+  osc.start(t);osc.stop(t+0.55);setTimeout(()=>{try{osc.dispose();amp.dispose();}catch(e){}},900);}
+
+/* ---- dades reals iMetro ---- */
+const CODES=NET.codes||{};
+const codeToStation=c=>STA[CODES[String(c)]];
+function parseImetro(raw){const serverT=raw.timestamp||Date.now();const arr=[];
+  for(const L of raw.linies||[]){const lineId=L.nom_linia;
+    for(const e of L.estacions||[]){const code=e.codi_estacio,sentit=e.id_sentit;
+      for(const tr of e.linies_trajectes||[]){const desti=tr.desti_trajecte;
+        for(const t of (tr.propers_trens||[])) arr.push({code,lineId,sentit,desti,servei:t.codi_servei,tArr:t.temps_arribada});}}}
+  return {serverT,arr};}
+
+let SCHED=[],seen=new Set(),demoSpeed=1,emitCount=0;
+let lastArrivals=[],clockOffset=0,trains=[],trainDots=[],trainsG=null,didDrag=false,popTimer=null;
+// arr: [{code,line|lineId,sentit,servei,tArr(ms)}] · serverT(ms) per corregir el rellotge
+function scheduleArrivals(arr,serverT){
+  if(!ready||!running)return;
+  if(!Object.keys(CODES).length){setStatus('Falten codis d\'estació: re-executa fetch-network.mjs.');return;}
+  lastArrivals=arr; clockOffset=serverT-Date.now(); buildTrains();
+  const wallNow=Date.now()+clockOffset, audioNow=Tone.now();
+  const groups={};
+  for(const a of arr){const k=a.code+'_'+a.sentit;(groups[k]||(groups[k]=[])).push(a);}
+  let added=0,skipped=0;
+  for(const k in groups){const g=groups[k].sort((x,y)=>x.tArr-y.tArr);
+    for(let i=0;i<g.length;i++){const a=g[i];const s=codeToStation(a.code);if(!s){skipped++;continue;}
+      const id=a.code+'_'+a.sentit+'_'+a.servei;if(seen.has(id))continue;
+      const delay=(a.tArr-wallNow)/1000;if(delay<-2||delay>180)continue; // horitzó ~3 min (refresc cada 2 min, amb marge)
+      const headway=i+1<g.length?(g[i+1].tArr-a.tArr)/1000:NaN;
+      SCHED.push({s,lineId:a.lineId||a.line,sentit:a.sentit,desti:a.desti,tArr:a.tArr,headway,tAudio:audioNow+Math.max(0,delay)/demoSpeed,id});
+      seen.add(id);added++;}}
+  if(seen.size>5000)seen=new Set();
+  SCHED.sort((x,y)=>x.tAudio-y.tAudio);
+  setStatus(`Arribades: ${arr.length} · ${added} prog · ${skipped} sense codi · ${new Date(serverT).toLocaleTimeString()}`);
+}
+function ingest(raw){const {serverT,arr}=parseImetro(raw);scheduleArrivals(arr,serverT);}
+function lineOf(ev){if(BYID[ev.lineId])return BYID[ev.lineId];
+  const c=ev.s.lines.find(id=>BYID[id]&&id.startsWith(ev.lineId));return BYID[c]||BYID[ev.s.lines[0]];}
+function lineFromArr(a,s){const raw=a.line||a.lineId;return BYID[raw]||(s.lines.map(id=>BYID[id]).find(l=>l&&raw&&l.id.startsWith(raw)))||BYID[s.lines[0]];}
+
+/* ---- trens en moviment (una boleta per tren, sense fantasmes) ---- */
+function buildTrains(){ trains=[];
+  if(!lastArrivals||!lastArrivals.length)return;
+  const byTrain={},segAcc={};
+  for(const a of lastArrivals){const s=STA[CODES[String(a.code)]];if(!s)continue;
+    const L=lineFromArr(a,s);if(!L)continue;const idx=L.seq.indexOf(s);if(idx<0)continue;
+    const key=L.id+'_'+a.sentit+'_'+a.servei;(byTrain[key]||(byTrain[key]=[])).push({L,idx,tArr:a.tArr,desti:a.desti});}
+  // temps de viatge per segment, a partir de trens amb parades consecutives
+  for(const k in byTrain){const g=byTrain[k].sort((x,y)=>x.tArr-y.tArr);
+    for(let i=0;i+1<g.length;i++){if(g[i].L===g[i+1].L&&Math.abs(g[i+1].idx-g[i].idx)===1){
+      const key=g[i].L.id+'|'+Math.min(g[i].idx,g[i+1].idx);(segAcc[key]||(segAcc[key]=[])).push(Math.abs(g[i+1].tArr-g[i].tArr));}}}
+  const segTime=(L,i,j)=>{const ar=segAcc[L.id+'|'+Math.min(i,j)];return ar&&ar.length?ar.reduce((p,q)=>p+q,0)/ar.length:75000;};
+  // cada tren → la seva propera estació; el situem al segment previ→propera segons la direcció
+  for(const k in byTrain){const g=byTrain[k];const nx=g.reduce((m,x)=>x.tArr<m.tArr?x:m,g[0]);
+    const L=nx.L,B=nx.idx,tNext=nx.tArr;const di=L.seq.findIndex(x=>x.name===nx.desti);
+    if(di<0||di===B)continue;const prev=di>B?B-1:B+1;if(prev<0||prev>=L.seq.length)continue;
+    trains.push({L,a:L.seq[prev],b:L.seq[B],tStart:tNext-segTime(L,prev,B),tEnd:tNext,color:L.color});}
+}
+function trainDot(i){if(trainDots[i])return trainDots[i];
+  const c=E('circle',{r:3.3,fill:'#fff',stroke:'#05060a','stroke-width':0.8});if(trainsG)trainsG.appendChild(c);trainDots[i]=c;return c;}
+function drawTrains(){const now=Date.now()+clockOffset;let n=0;
+  for(const tr of trains){if(!tr.L.on)continue;const dur=tr.tEnd-tr.tStart;if(dur<=0)continue;
+    const frac=(now-tr.tStart)/dur;if(frac<0||frac>1)continue;   // anti-fantasma: només si realment és entre les dues estacions
+    const x=tr.a.x+(tr.b.x-tr.a.x)*frac,y=tr.a.y+(tr.b.y-tr.a.y)*frac;
+    const d=trainDot(n++);d.setAttribute('cx',x.toFixed(1));d.setAttribute('cy',y.toFixed(1));d.setAttribute('fill',tr.color);d.setAttribute('display','inline');}
+  for(;n<trainDots.length;n++)trainDots[n].setAttribute('display','none');}
+
+/* ---- popup de node amb countdown en viu ---- */
+function nodeArrivals(s){if(!lastArrivals)return[];const now=Date.now()+clockOffset;
+  return lastArrivals.filter(a=>CODES[String(a.code)]===s.name&&a.tArr>now-5000).sort((x,y)=>x.tArr-y.tArr).slice(0,6);}
+function closeNode(){const p=document.getElementById('nodepop');if(p)p.style.display='none';if(popTimer){clearInterval(popTimer);popTimer=null;}}
+function openNode(s){const stage=document.querySelector('.stage');if(!stage)return;
+  let pop=document.getElementById('nodepop');if(!pop){pop=document.createElement('div');pop.id='nodepop';stage.appendChild(pop);}
+  const draw=()=>{const arr=nodeArrivals(s),now=Date.now()+clockOffset;
+    let h=`<div class="nphead"><b>${s.name}</b><span id="npclose">✕</span></div>`;
+    if(!arr.length)h+='<div class="nprow muted">Sense arribades properes</div>';
+    else for(const a of arr){const L=lineFromArr(a,s),col=(L&&L.color)||'#888',id=L?L.id:(a.line||a.lineId);
+      const rem=Math.max(0,Math.round((a.tArr-now)/1000)),cd=Math.floor(rem/60)+':'+String(rem%60).padStart(2,'0');
+      h+=`<div class="nprow"><span class="npic" style="background:${col};color:${contrastText(col)}">${id}</span><span class="npdest">→ ${a.desti||''}</span><span class="npcd">${cd}</span></div>`;}
+    pop.innerHTML=h;const c=document.getElementById('npclose');if(c)c.onclick=closeNode;};
+  draw();
+  const b=s.hit.getBoundingClientRect(),sr=stage.getBoundingClientRect();
+  pop.style.left=Math.max(6,Math.min(sr.width-200,b.left-sr.left+10))+'px';
+  pop.style.top=Math.max(6,Math.min(sr.height-120,b.top-sr.top+10))+'px';
+  pop.style.display='block';
+  if(popTimer)clearInterval(popTimer);popTimer=setInterval(draw,1000);}
+let coincBuf=[];
+function contrastText(hex){const c=(hex||'').replace('#','');if(c.length<6)return '#fff';
+  const r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);
+  return (0.299*r+0.587*g+0.114*b)/255>0.6?'#10131c':'#fff';}
+function logArrival(ev,L){
+  const box=document.getElementById('logbox'); if(!box)return;
+  const hh=new Date(ev.tArr||Date.now()).toLocaleTimeString('ca-ES',{hour12:false});
+  const id=L?L.id:ev.lineId; const col=(L&&L.color)||'#888';
+  const n=document.createElement('div'); n.className='notif';
+  const ic=document.createElement('span'); ic.className='ic'; ic.style.background=col; ic.style.color=contrastText(col); ic.textContent=id;
+  const body=document.createElement('span'); body.className='body';
+  const t1=document.createElement('span'); t1.className='t1'; t1.textContent=ev.s.name;
+  const t2=document.createElement('span'); t2.className='t2'; t2.textContent='→ '+(ev.desti||'');
+  body.append(t1,t2);
+  const tm=document.createElement('span'); tm.className='tm'; tm.textContent=hh;
+  n.append(ic,body,tm);
+  box.prepend(n);
+  while(box.childElementCount>80) box.removeChild(box.lastChild);
+}
+function fireArrival(ev,t){
+  const s=ev.s,L=lineOf(ev);if(!L||!L.on)return;            // (#1) línia desactivada → ni so ni flash
+  const hub=s.inter, central=Math.min(4,(s.lines?s.lines.length:1));
+  let f=L.note*(hub?0.5:1); if(central>=3)f*=0.5;           // centre→greu
+  let g=(hub?0.8:0.5)+(central-1)*0.05;                     // centre→més energia
+  const bright=isNaN(ev.headway)?0.5:clamp(1-(ev.headway-90)/300,0.15,1); // pas freqüent→brillant
+  const durK=isNaN(ev.headway)?1:clamp(ev.headway/180,0.7,1.6);
+  const det=ev.sentit===1?-7:7;                             // sentit→detune (marea)
+  const pan=clamp((s.x/VBW)*2-1,-1,1);                      // (#2) pan segons posició X al mapa
+  const idx=L.seq.indexOf(s);                               // (#3) harmònics segons proximitat al terminal de DESTÍ (depèn de la direcció)
+  let harm=0.3;
+  if(idx>=0&&L.seq.length>1){
+    const di=L.seq.findIndex(x=>x.name===ev.desti);         // terminal cap on va aquest tren (segons el sentit)
+    harm = di>=0 ? 1-Math.abs(idx-di)/(L.seq.length-1)      // a prop del seu destí → sawtooth · lluny → ~sinus
+                 : idx/(L.seq.length-1);                     // fallback si el destí no és a la seqüència
+  }
+  const C=0.06;let rf=false;for(const e of coincBuf){if(Math.abs(t-e)<C){rf=true;break;}}
+  coincBuf.push(t);if(coincBuf.length>40)coincBuf.shift();
+  if(rf){g*=1.5;accent(t,L.note,0.26);}                     // coincidència→reforç harmònic
+  neuron(t,f,pan,g,hub,bright,det,durK,harm);              // harm = proximitat al final de línia
+  setTimeout(()=>{s.flash=Math.max(s.flash,rf?1.4:1);},Math.max(0,(t-Tone.now())*1000));
+  fireTimes.push(performance.now());emitCount++;
+  logArrival(ev,L);                                         // (#4) registre escrit (línia resolta)
+}
+
+/* ---- loop (scheduler look-ahead + densitat) ---- */
+let running=false,density=0,fireTimes=[];
+function step(){
+  if(ready&&running){const a=Tone.now();
+    while(SCHED.length&&SCHED[0].tAudio<a+0.1){const ev=SCHED.shift();if(ev.tAudio>=a-0.25)fireArrival(ev,Math.max(a,ev.tAudio));}
+    const cut=performance.now()-60000;while(fireTimes.length&&fireTimes[0]<cut)fireTimes.shift();
+    density=Math.round(fireTimes.length*demoSpeed);            // ~arribades/min reals
+    const d01=clamp(density/120,0,1);
+    if(mFilt)mFilt.frequency.rampTo(2000+8000*d01,0.5);
+    if(reverb)reverb.wet.rampTo(0.34-0.16*d01,0.6);
+  }
+  for(const s of Object.values(STA)){if(s.flash>0.01){const b=s.base,f=s.flash;
+    s.halo.setAttribute('r',(b+f*13).toFixed(1));s.halo.setAttribute('fill-opacity',(0.55*f).toFixed(3));
+    s.wave.setAttribute('r',(b+(1.4-f)*20+5).toFixed(1));s.wave.setAttribute('stroke-opacity',(0.6*Math.min(1,f)).toFixed(3));
+    s.core.setAttribute('r',(b+f*3).toFixed(2));s.core.setAttribute('fill',f>0.5?'#fff':(s.inter?'#10131c':'#161a24'));
+    s.flash*=0.90;if(s.flash<0.01){s.flash=0;s.halo.setAttribute('fill-opacity',0);s.wave.setAttribute('stroke-opacity',0);s.core.setAttribute('r',b);s.core.setAttribute('fill',s.inter?'#10131c':'#161a24');}}}
+  drawTrains();
+  const cohEl=document.getElementById('coh'); if(cohEl)cohEl.textContent=density;
+  const voicesEl=document.getElementById('voices'); if(voicesEl)voicesEl.textContent=voices;
+  requestAnimationFrame(step);}
+setInterval(()=>{const epsEl=document.getElementById('eps'); if(epsEl)epsEl.textContent=emitCount; emitCount=0;},1000);
+
+/* ---- càrrega de dades: Supabase (preferent) o snapshot local (fallback) ---- */
+const SUPA_URL=(typeof window!=='undefined'&&window.SUPABASE_URL)||'';
+const SUPA_KEY=(typeof window!=='undefined'&&window.SUPABASE_ANON_KEY)||'';
+function setStatus(m){const el=document.getElementById('datastatus');if(el)el.textContent=m;}
+async function poll(){
+  // 1) Supabase (font definitiva)
+  if(SUPA_URL&&SUPA_KEY){
+    try{
+      const r=await fetch(SUPA_URL+'/rest/v1/rpc/get_upcoming',{method:'POST',
+        headers:{'Content-Type':'application/json',apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY},
+        body:JSON.stringify({horizon_minutes:5})});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const d=await r.json();const arr=d.arrivals||[];
+      if(running&&ready)scheduleArrivals(arr,d.server_now||Date.now());
+      else setStatus('Supabase a punt ('+arr.length+' arribades). Prem «Activa l\'àudio».');
+      return;
+    }catch(e){setStatus('Supabase error: '+e.message+' · provant local…');}
+  }
+  // 2) fallback: snapshot local (imetro.json o imetro-data.js)
+  let data=null;
+  try{const r=await fetch('imetro.json',{cache:'no-store'});if(r.ok)data=await r.json();}catch(e){}
+  if(!data&&window.IMETRO)data=window.IMETRO;
+  if(!data){setStatus('Sense dades. Configura supabase-config.js (o executa fetch-imetro.mjs).');return;}
+  if(running&&ready)ingest(data);
+  else setStatus('Dades locals a punt. Prem «Activa l\'àudio».');
+}
+setInterval(poll,120000);
+
+/* ---- UI ---- */
+function lineKey(id){const m=/(\d+)/.exec(id);const num=m?+m[1]:999;const suf=/N$/.test(id)?0:/S$/.test(id)?1:0;return num*10+suf;}
+function lineList(){const lc=document.getElementById('lines');lc.innerHTML='';
+  [...LINES].sort((a,b)=>lineKey(a.id)-lineKey(b.id)).forEach(L=>{const d=document.createElement('div');d.className='ln';
+    d.innerHTML=`<span class="sw" style="background:${L.color}"></span><span class="nm" style="color:${L.color}">${L.id}</span><span class="meta">${L.seq.length} est</span>`;
+    d.onclick=()=>{L.on=!L.on;d.classList.toggle('off',!L.on);if(L.pathEl)L.pathEl.setAttribute('stroke-opacity',L.on?0.85:0.12);};
+    lc.appendChild(d);});}
+const power=document.getElementById('power');
+power.onclick=async()=>{if(!running){await Tone.start();if(!ready)master();running=true;power.textContent='■ Atura';power.classList.add('stop');poll();}
+  else{running=false;power.textContent='▶ Activa l\'àudio';power.classList.remove('stop');}};
+const bind=(id,fn,fmt)=>{const e=document.getElementById(id);e.oninput=()=>{fn(parseFloat(e.value));if(fmt)document.getElementById(id+'V').textContent=fmt(e.value);};};
+bind('vol',v=>{if(mVol)mVol.gain.rampTo(Tone.dbToGain(v),0.1);},v=>`${v} dB`);
+bind('speed',v=>{demoSpeed=v;},v=>`${v}×`);
+bind('bgo',v=>{if(bgImg)bgImg.setAttribute('opacity',v/100);},v=>`${v}%`);
+bind('ovo',v=>{if(overlayG)overlayG.setAttribute('opacity',v/100);},v=>`${v}%`);
+document.getElementById('bg').onchange=e=>{if(bgImg)bgImg.setAttribute('display',e.target.checked?'inline':'none');};
+document.getElementById('tps').onchange=e=>{useTPS=e.target.checked;layout();};
+document.getElementById('names').onchange=e=>{if(labelsG)labelsG.setAttribute('display',e.target.checked?'inline':'none');};
+document.getElementById('cal').onchange=e=>setEditMode(e.target.checked);
+
+/* ---- mode admin (protegit per hash SHA-256) ---- */
+const ADMIN_HASH=(typeof window!=='undefined'&&window.ADMIN_HASH)||'';
+let admin=false;
+async function sha256(s){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+function applyMode(){
+  document.querySelectorAll('.dev-only').forEach(el=>{el.style.display=admin?'':'none';});
+  const $=id=>document.getElementById(id);
+  if(admin){ // restaura segons els controls de desenvolupament
+    if(bgImg){bgImg.setAttribute('opacity',(+$('bgo').value)/100);bgImg.setAttribute('display',$('bg').checked?'inline':'none');}
+    if(overlayG)overlayG.setAttribute('opacity',(+$('ovo').value)/100);
+    if(labelsG)labelsG.setAttribute('display',$('names').checked?'inline':'none');
+    useTPS=$('tps').checked; demoSpeed=parseFloat($('speed').value)||1; setEditMode($('cal').checked);
+  }else{ // MODE USUARI: valors forçats
+    if(bgImg){bgImg.setAttribute('opacity',0.20);bgImg.setAttribute('display','inline');}
+    if(overlayG)overlayG.setAttribute('opacity',1);
+    if(labelsG)labelsG.setAttribute('display','none');
+    useTPS=true; demoSpeed=1; setEditMode(false);
+  }
+  layout();
+}
+document.getElementById('adminBtn').onclick=async()=>{
+  const btn=document.getElementById('adminBtn');
+  if(!admin){
+    const p=prompt('Contrasenya admin:'); if(p==null)return;
+    const ok = ADMIN_HASH && (await sha256(p))===ADMIN_HASH;
+    if(ok){admin=true;btn.textContent='Admin ✓';btn.classList.add('on');applyMode();}
+    else alert('Contrasenya incorrecta.');
+  }else{admin=false;btn.textContent='Admin';btn.classList.remove('on');applyMode();}
+};
+
+buildNet();computeWarp();render();lineList();fitToImage(IMG_SRC);
+applyMode();   // arrenca en mode USUARI
+if(Object.keys(LAY).length) flash('Disposició desada carregada ('+Object.keys(LAY).length+').');
+poll();
+requestAnimationFrame(step);
+</script>
+</body>
+</html>
