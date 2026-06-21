@@ -20,6 +20,12 @@ supabase/.temp/
 imetro.json
 imetro-data.js
 
+# GTFS local (es baixa; no es versiona)
+gtfs/
+gtfs.zip
+gtfs_schedule.json
+schedule.json
+
 # Dependencies
 node_modules/
 
@@ -27,6 +33,11 @@ node_modules/
 dist/
 build/
 
-# Materials pesats
+# Materials pesats (fonts del mapa; es queden locals)
+assets/mapa-metro-barcelona-2026-big.pdf
+assets/mapa-metro-barcelona-2026-big.png
 mapa-metro-barcelona-2026-big.pdf
 mapa-metro-barcelona-2026-big.png
+
+# Prototips antics arxivats (no es pugen)
+_arxiu/

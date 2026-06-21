@@ -6,6 +6,7 @@
 <title>AudioMetro — híbrid (mapa oficial + editor de disposició)</title>
 <script src="network-data.js"></script>
 <script src="supabase-config.js" onerror="window.__noSupa=1"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="imetro-data.js" onerror="window.__noImetro=1"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
@@ -42,6 +43,9 @@
   .zoom{position:absolute;top:10px;right:10px;display:flex;flex-direction:column;gap:6px;z-index:5}
   .zoom button{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:rgba(18,22,34,.92);color:var(--ink);font-size:18px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center}
   .zoom button:hover{border-color:var(--accent);color:var(--accent)}
+  .fsbtn{position:absolute;top:10px;left:10px;width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:rgba(18,22,34,.92);color:var(--ink);font-size:16px;cursor:pointer;z-index:5}
+  .fsbtn:hover{border-color:var(--accent);color:var(--accent)}
+  .logstats{font-size:11.5px;color:var(--accent);font-variant-numeric:tabular-nums;margin-bottom:8px}
   .meters{display:flex;gap:16px;padding:9px 14px;border-top:1px solid var(--line);flex-wrap:wrap}
   .meter .big{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
   .meter .lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
@@ -53,6 +57,13 @@
   .admin{background:#1b2030;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px;white-space:nowrap}
   .admin:hover{border-color:var(--accent);color:var(--accent)}
   .admin.on{background:var(--accent);color:#06201d;border-color:var(--accent);font-weight:700}
+  .pwoverlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:50}
+  .pwbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;width:280px;box-shadow:0 12px 44px rgba(0,0,0,.6)}
+  .pwtitle{font-size:13px;font-weight:600;margin-bottom:10px}
+  .pwinput{width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:#0e1118;color:var(--ink);font-size:14px}
+  .pwshow{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);margin:9px 0 13px;cursor:pointer}
+  .pwshow input{accent-color:var(--accent)}
+  .pwbtns{display:flex;gap:8px;justify-content:flex-end}
   #logbox{display:flex;flex-direction:column;gap:5px;max-height:300px;overflow:auto;padding-right:2px}
   .notif{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.05);border:1px solid var(--line);
     border-radius:11px;padding:6px 9px;animation:notifIn .18s ease}
@@ -63,15 +74,6 @@
   .notif .t1{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .notif .t2{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .notif .tm{font-size:10px;color:var(--muted);flex:0 0 auto;align-self:flex-start;font-variant-numeric:tabular-nums}
-  #nodepop{position:absolute;display:none;min-width:175px;max-width:230px;background:rgba(16,19,28,.97);
-    border:1px solid var(--line);border-radius:11px;padding:9px 10px;z-index:8;box-shadow:0 8px 26px rgba(0,0,0,.55)}
-  .nphead{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;margin-bottom:7px}
-  #npclose{cursor:pointer;color:var(--muted);font-size:12px}
-  .nprow{display:flex;align-items:center;gap:7px;padding:3px 0;font-size:12px}
-  .nprow.muted{color:var(--muted)}
-  .npic{width:24px;height:18px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:8.5px;font-weight:800;flex:0 0 auto}
-  .npdest{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .npcd{font-variant-numeric:tabular-nums;font-weight:700;color:var(--accent);flex:0 0 auto}
 </style>
 </head>
 <body>
@@ -104,6 +106,9 @@
         <button class="btn" id="export">Exportar JSON</button>
         <button class="btn" id="import">Importar JSON</button>
       </div>
+      <div class="btnrow">
+        <button class="btn save" id="publish">⬆ Actualitza online (per a tothom)</button>
+      </div>
       <input type="file" id="file" accept="application/json" style="display:none" />
       <div id="status"></div>
       <div class="note">El primer cop, les estacions parteixen del calibratge automàtic (TPS) sobre 12 punts.
@@ -131,12 +136,14 @@
     </div>
     <div class="panel" style="margin-top:12px">
       <h2>Registre d'arribades</h2>
+      <div id="logstats" class="logstats">0 arribades/min · 0 impulsos/s</div>
       <div id="logbox"></div>
     </div>
   </div>
 
   <div class="stage">
     <svg id="map" viewBox="0 0 1000 674" preserveAspectRatio="xMidYMid meet"></svg>
+    <button id="fsbtn" class="fsbtn" title="Pantalla completa">⛶</button>
     <div class="zoom dev-only">
       <button id="zin" title="Apropa">+</button>
       <button id="zout" title="Allunya">−</button>
@@ -218,9 +225,12 @@ function makeTPS(src,val){const n=src.length,m=n+3,A=Array.from({length:m},()=>n
 
 /* ---- xarxa ---- */
 let LINES=[],STA={},BYID={},BND,kZoom=1;
+const SKIP_LINES=new Set(['FM']);   // FM (funicular) fora
+const linesSeen=new Set();          // línies amb dades vistes aquesta sessió
 function buildNet(){
   STA={};LINES=[];BYID={};
   NET.lines.forEach((L,i)=>{
+    if(SKIP_LINES.has(L.id))return;
     const cfg=LCFG[L.id]||{n:SCALE[i%SCALE.length],h:240,j:.06,a:1};
     const o={id:L.id,color:L.color,note:nf(cfg.n[0],cfg.n[1]),head:cfg.h,jitter:cfg.j,auto:cfg.a,
              on:true,seq:[]};
@@ -267,15 +277,13 @@ function render(){
     s.wave=E('circle',{r:base,fill:'none',stroke:'#fff','stroke-width':1.4,'stroke-opacity':0});
     s.halo=E('circle',{r:base,fill:'#fff','fill-opacity':0});
     s.core=E('circle',{r:base,fill:s.inter?'#10131c':'#161a24',stroke:s.inter?'#fff':colorOf(s),'stroke-width':s.inter?1.8:1.3});
-    s.hit=E('circle',{r:7,fill:'transparent','pointer-events':'all'});
+    s.hit=E('circle',{r:7,fill:'transparent','pointer-events':'none'});
     const tt=E('title',{});tt.textContent=s.name;s.hit.appendChild(tt);
     overlayG.appendChild(s.wave);overlayG.appendChild(s.halo);overlayG.appendChild(s.core);overlayG.appendChild(s.hit);
     s.label=E('text',{'font-size':8,'paint-order':'stroke',stroke:'#000','stroke-width':2.4,'stroke-opacity':0.78,fill:s.inter?'#ffd166':'#fff','font-weight':s.inter?700:500});
     s.label.textContent=s.name;labelsG.appendChild(s.label);
     s.hit.addEventListener('pointerdown',ev=>startDrag(ev,s));
-    s.hit.addEventListener('click',()=>{if(!didDrag)openNode(s);didDrag=false;});
   }
-  trainDots=[]; trainsG=E('g',{'pointer-events':'none'}); svg.appendChild(trainsG);
   svg.appendChild(labelsG);
   document.getElementById('nst').textContent=Object.keys(STA).length;
   layout();updateStatus();updateLabelScale();
@@ -316,7 +324,7 @@ function zoomBy(f,cx,cy){cx=cx==null?vb.x+vb.w/2:cx;cy=cy==null?vb.y+vb.h/2:cy;
   vb.x=cx-(cx-vb.x)*(nw/vb.w);vb.y=cy-(cy-vb.y)*(nh/vb.h);vb.w=nw;vb.h=nh;clampPan();applyVB();updateLabelScale();}
 
 let panning=false,panStart=null;
-svg.addEventListener('pointerdown',ev=>{if(dragS)return;closeNode();panning=true;panStart={mx:ev.clientX,my:ev.clientY,vx:vb.x,vy:vb.y};svg.setPointerCapture(ev.pointerId);svg.style.cursor='grabbing';});
+svg.addEventListener('pointerdown',ev=>{if(dragS)return;panning=true;panStart={mx:ev.clientX,my:ev.clientY,vx:vb.x,vy:vb.y};svg.setPointerCapture(ev.pointerId);svg.style.cursor='grabbing';});
 svg.addEventListener('pointermove',ev=>{
   if(dragS){didDrag=true;const[x,y]=toVB(ev);LAY[dragS.name]={fx:clamp(x/VBW,0,1),fy:clamp(y/VBH,0,1)};
     place(dragS);setEls(dragS);for(const id of dragS.lines){const L=BYID[id];if(L)setPath(L);}updateStatus();return;}
@@ -333,7 +341,7 @@ document.getElementById('zout').onclick=()=>zoomBy(1.25);
 document.getElementById('zfit').onclick=()=>{vb={x:0,y:0,w:VBW,h:VBH};applyVB();updateLabelScale();};
 function setEditMode(on){editOn=on;
   for(const s of Object.values(STA)){
-    s.hit.setAttribute('pointer-events','all');
+    s.hit.setAttribute('pointer-events',on?'all':'none');
     s.hit.setAttribute('r',on?7:7);
     s.core.setAttribute('stroke-width',on?(s.inter?2.4:2):(s.inter?1.8:1.3));
   }
@@ -354,6 +362,29 @@ document.getElementById('reset').onclick=()=>{LAY={};try{localStorage.removeItem
   computeWarp();layout();updateStatus();flash('Restablert al calibratge automàtic.');};
 document.getElementById('export').onclick=()=>{snapshotAll();const blob=new Blob([JSON.stringify(LAY,null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='disposicio.json';a.click();flash('Exportat disposicio.json');};
+document.getElementById('publish').onclick=async()=>{
+  snapshotAll();
+  if(sb){ // PAS 5: desa directament a la taula `layout` (la RLS només ho permet a l'admin autenticat)
+    const {data:{session}}=await sb.auth.getSession();
+    if(!session){alert('Has d\'iniciar sessió com a admin (botó «Admin») per publicar.');return;}
+    const {error}=await sb.from('layout').upsert({id:1,data:LAY,updated_at:new Date().toISOString()});
+    if(error) flash('Error en publicar: '+error.message);
+    else flash('Publicat online ✓ ('+Object.keys(LAY).length+'). Tothom ho veurà en recarregar.');
+    return;
+  }
+  // fallback sense supabase-js: Edge Function save-layout (hash)
+  if(!SUPA_URL||!SUPA_KEY){flash('Cal Supabase configurat per publicar.');return;}
+  const pass=await askPassword('Contrasenya admin per publicar'); if(pass==null)return;
+  const hash=await sha256(pass);
+  try{
+    const r=await fetch(SUPA_URL+'/functions/v1/save-layout',{method:'POST',
+      headers:{'Content-Type':'application/json',apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY},
+      body:JSON.stringify({hash,data:LAY})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok&&d.ok) flash('Publicat online ✓ ('+(d.estacions||Object.keys(LAY).length)+').');
+    else flash('Error en publicar: '+(d.error||('HTTP '+r.status)));
+  }catch(e){flash('Error de xarxa: '+e.message);}
+};
 document.getElementById('import').onclick=()=>document.getElementById('file').click();
 document.getElementById('file').onchange=ev=>{const f=ev.target.files[0];if(!f)return;const rd=new FileReader();
   rd.onload=()=>{try{LAY=JSON.parse(rd.result);layout();updateStatus();flash('Importat ('+Object.keys(LAY).length+').');}catch(e){flash('JSON invàlid.');}};rd.readAsText(f);};
@@ -383,6 +414,7 @@ function accent(t,f,g){const amp=new Tone.Gain(0).connect(bus),osc=new Tone.Osci
 /* ---- dades reals iMetro ---- */
 const CODES=NET.codes||{};
 const codeToStation=c=>STA[CODES[String(c)]];
+// L'horari (L9/L10) ve fusionat des de get_upcoming() a Supabase; el frontend no fa res especial.
 function parseImetro(raw){const serverT=raw.timestamp||Date.now();const arr=[];
   for(const L of raw.linies||[]){const lineId=L.nom_linia;
     for(const e of L.estacions||[]){const code=e.codi_estacio,sentit=e.id_sentit;
@@ -391,12 +423,14 @@ function parseImetro(raw){const serverT=raw.timestamp||Date.now();const arr=[];
   return {serverT,arr};}
 
 let SCHED=[],seen=new Set(),demoSpeed=1,emitCount=0;
-let lastArrivals=[],clockOffset=0,trains=[],trainDots=[],trainsG=null,didDrag=false,popTimer=null;
+// hash estable d'una cadena → [0,1) (FNV-1a) per al dither sub-segon
+function hashUnit(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return (h>>>0)%100000/100000;}
+let lastArrivals=[],clockOffset=0,didDrag=false;
 // arr: [{code,line|lineId,sentit,servei,tArr(ms)}] · serverT(ms) per corregir el rellotge
 function scheduleArrivals(arr,serverT){
   if(!ready||!running)return;
   if(!Object.keys(CODES).length){setStatus('Falten codis d\'estació: re-executa fetch-network.mjs.');return;}
-  lastArrivals=arr; clockOffset=serverT-Date.now(); buildTrains();
+  lastArrivals=arr; clockOffset=serverT-Date.now();
   const wallNow=Date.now()+clockOffset, audioNow=Tone.now();
   const groups={};
   for(const a of arr){const k=a.code+'_'+a.sentit;(groups[k]||(groups[k]=[])).push(a);}
@@ -406,7 +440,8 @@ function scheduleArrivals(arr,serverT){
       const id=a.code+'_'+a.sentit+'_'+a.servei;if(seen.has(id))continue;
       const delay=(a.tArr-wallNow)/1000;if(delay<-2||delay>180)continue; // horitzó ~3 min (refresc cada 2 min, amb marge)
       const headway=i+1<g.length?(g[i+1].tArr-a.tArr)/1000:NaN;
-      SCHED.push({s,lineId:a.lineId||a.line,sentit:a.sentit,desti:a.desti,tArr:a.tArr,headway,tAudio:audioNow+Math.max(0,delay)/demoSpeed,id});
+      const jit=(hashUnit(id)-0.5)*0.9;  // dither sub-segon estable per tren: trenca la graella d'1 s (dades de TMB al segon)
+      SCHED.push({s,lineId:a.lineId||a.line,sentit:a.sentit,desti:a.desti,tArr:a.tArr,headway,tAudio:audioNow+Math.max(0,delay+jit)/demoSpeed,id});
       seen.add(id);added++;}}
   if(seen.size>5000)seen=new Set();
   SCHED.sort((x,y)=>x.tAudio-y.tAudio);
@@ -417,52 +452,6 @@ function lineOf(ev){if(BYID[ev.lineId])return BYID[ev.lineId];
   const c=ev.s.lines.find(id=>BYID[id]&&id.startsWith(ev.lineId));return BYID[c]||BYID[ev.s.lines[0]];}
 function lineFromArr(a,s){const raw=a.line||a.lineId;return BYID[raw]||(s.lines.map(id=>BYID[id]).find(l=>l&&raw&&l.id.startsWith(raw)))||BYID[s.lines[0]];}
 
-/* ---- trens en moviment (una boleta per tren, sense fantasmes) ---- */
-function buildTrains(){ trains=[];
-  if(!lastArrivals||!lastArrivals.length)return;
-  const byTrain={},segAcc={};
-  for(const a of lastArrivals){const s=STA[CODES[String(a.code)]];if(!s)continue;
-    const L=lineFromArr(a,s);if(!L)continue;const idx=L.seq.indexOf(s);if(idx<0)continue;
-    const key=L.id+'_'+a.sentit+'_'+a.servei;(byTrain[key]||(byTrain[key]=[])).push({L,idx,tArr:a.tArr,desti:a.desti});}
-  // temps de viatge per segment, a partir de trens amb parades consecutives
-  for(const k in byTrain){const g=byTrain[k].sort((x,y)=>x.tArr-y.tArr);
-    for(let i=0;i+1<g.length;i++){if(g[i].L===g[i+1].L&&Math.abs(g[i+1].idx-g[i].idx)===1){
-      const key=g[i].L.id+'|'+Math.min(g[i].idx,g[i+1].idx);(segAcc[key]||(segAcc[key]=[])).push(Math.abs(g[i+1].tArr-g[i].tArr));}}}
-  const segTime=(L,i,j)=>{const ar=segAcc[L.id+'|'+Math.min(i,j)];return ar&&ar.length?ar.reduce((p,q)=>p+q,0)/ar.length:75000;};
-  // cada tren → la seva propera estació; el situem al segment previ→propera segons la direcció
-  for(const k in byTrain){const g=byTrain[k];const nx=g.reduce((m,x)=>x.tArr<m.tArr?x:m,g[0]);
-    const L=nx.L,B=nx.idx,tNext=nx.tArr;const di=L.seq.findIndex(x=>x.name===nx.desti);
-    if(di<0||di===B)continue;const prev=di>B?B-1:B+1;if(prev<0||prev>=L.seq.length)continue;
-    trains.push({L,a:L.seq[prev],b:L.seq[B],tStart:tNext-segTime(L,prev,B),tEnd:tNext,color:L.color});}
-}
-function trainDot(i){if(trainDots[i])return trainDots[i];
-  const c=E('circle',{r:3.3,fill:'#fff',stroke:'#05060a','stroke-width':0.8});if(trainsG)trainsG.appendChild(c);trainDots[i]=c;return c;}
-function drawTrains(){const now=Date.now()+clockOffset;let n=0;
-  for(const tr of trains){if(!tr.L.on)continue;const dur=tr.tEnd-tr.tStart;if(dur<=0)continue;
-    const frac=(now-tr.tStart)/dur;if(frac<0||frac>1)continue;   // anti-fantasma: només si realment és entre les dues estacions
-    const x=tr.a.x+(tr.b.x-tr.a.x)*frac,y=tr.a.y+(tr.b.y-tr.a.y)*frac;
-    const d=trainDot(n++);d.setAttribute('cx',x.toFixed(1));d.setAttribute('cy',y.toFixed(1));d.setAttribute('fill',tr.color);d.setAttribute('display','inline');}
-  for(;n<trainDots.length;n++)trainDots[n].setAttribute('display','none');}
-
-/* ---- popup de node amb countdown en viu ---- */
-function nodeArrivals(s){if(!lastArrivals)return[];const now=Date.now()+clockOffset;
-  return lastArrivals.filter(a=>CODES[String(a.code)]===s.name&&a.tArr>now-5000).sort((x,y)=>x.tArr-y.tArr).slice(0,6);}
-function closeNode(){const p=document.getElementById('nodepop');if(p)p.style.display='none';if(popTimer){clearInterval(popTimer);popTimer=null;}}
-function openNode(s){const stage=document.querySelector('.stage');if(!stage)return;
-  let pop=document.getElementById('nodepop');if(!pop){pop=document.createElement('div');pop.id='nodepop';stage.appendChild(pop);}
-  const draw=()=>{const arr=nodeArrivals(s),now=Date.now()+clockOffset;
-    let h=`<div class="nphead"><b>${s.name}</b><span id="npclose">✕</span></div>`;
-    if(!arr.length)h+='<div class="nprow muted">Sense arribades properes</div>';
-    else for(const a of arr){const L=lineFromArr(a,s),col=(L&&L.color)||'#888',id=L?L.id:(a.line||a.lineId);
-      const rem=Math.max(0,Math.round((a.tArr-now)/1000)),cd=Math.floor(rem/60)+':'+String(rem%60).padStart(2,'0');
-      h+=`<div class="nprow"><span class="npic" style="background:${col};color:${contrastText(col)}">${id}</span><span class="npdest">→ ${a.desti||''}</span><span class="npcd">${cd}</span></div>`;}
-    pop.innerHTML=h;const c=document.getElementById('npclose');if(c)c.onclick=closeNode;};
-  draw();
-  const b=s.hit.getBoundingClientRect(),sr=stage.getBoundingClientRect();
-  pop.style.left=Math.max(6,Math.min(sr.width-200,b.left-sr.left+10))+'px';
-  pop.style.top=Math.max(6,Math.min(sr.height-120,b.top-sr.top+10))+'px';
-  pop.style.display='block';
-  if(popTimer)clearInterval(popTimer);popTimer=setInterval(draw,1000);}
 let coincBuf=[];
 function contrastText(hex){const c=(hex||'').replace('#','');if(c.length<6)return '#fff';
   const r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);
@@ -508,7 +497,7 @@ function fireArrival(ev,t){
 }
 
 /* ---- loop (scheduler look-ahead + densitat) ---- */
-let running=false,density=0,fireTimes=[];
+let running=false,density=0,fireTimes=[],epsShown=0;
 function step(){
   if(ready&&running){const a=Tone.now();
     while(SCHED.length&&SCHED[0].tAudio<a+0.1){const ev=SCHED.shift();if(ev.tAudio>=a-0.25)fireArrival(ev,Math.max(a,ev.tAudio));}
@@ -523,15 +512,16 @@ function step(){
     s.wave.setAttribute('r',(b+(1.4-f)*20+5).toFixed(1));s.wave.setAttribute('stroke-opacity',(0.6*Math.min(1,f)).toFixed(3));
     s.core.setAttribute('r',(b+f*3).toFixed(2));s.core.setAttribute('fill',f>0.5?'#fff':(s.inter?'#10131c':'#161a24'));
     s.flash*=0.90;if(s.flash<0.01){s.flash=0;s.halo.setAttribute('fill-opacity',0);s.wave.setAttribute('stroke-opacity',0);s.core.setAttribute('r',b);s.core.setAttribute('fill',s.inter?'#10131c':'#161a24');}}}
-  drawTrains();
   const cohEl=document.getElementById('coh'); if(cohEl)cohEl.textContent=density;
   const voicesEl=document.getElementById('voices'); if(voicesEl)voicesEl.textContent=voices;
+  const ls=document.getElementById('logstats'); if(ls)ls.textContent=density+' arribades/min · '+epsShown+' impulsos/s';
   requestAnimationFrame(step);}
-setInterval(()=>{const epsEl=document.getElementById('eps'); if(epsEl)epsEl.textContent=emitCount; emitCount=0;},1000);
+setInterval(()=>{epsShown=emitCount; const epsEl=document.getElementById('eps'); if(epsEl)epsEl.textContent=emitCount; emitCount=0;},1000);
 
 /* ---- càrrega de dades: Supabase (preferent) o snapshot local (fallback) ---- */
 const SUPA_URL=(typeof window!=='undefined'&&window.SUPABASE_URL)||'';
 const SUPA_KEY=(typeof window!=='undefined'&&window.SUPABASE_ANON_KEY)||'';
+const sb=(window.supabase&&SUPA_URL&&SUPA_KEY)?window.supabase.createClient(SUPA_URL,SUPA_KEY):null;
 function setStatus(m){const el=document.getElementById('datastatus');if(el)el.textContent=m;}
 async function poll(){
   // 1) Supabase (font definitiva)
@@ -541,8 +531,9 @@ async function poll(){
         headers:{'Content-Type':'application/json',apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY},
         body:JSON.stringify({horizon_minutes:5})});
       if(!r.ok)throw new Error('HTTP '+r.status);
-      const d=await r.json();const arr=d.arrivals||[];
-      if(running&&ready)scheduleArrivals(arr,d.server_now||Date.now());
+      const d=await r.json();const arr=d.arrivals||[];const sT=d.server_now||Date.now();
+      lastArrivals=arr; clockOffset=sT-Date.now(); updateLineCounts();
+      if(running&&ready)scheduleArrivals(arr,sT);
       else setStatus('Supabase a punt ('+arr.length+' arribades). Prem «Activa l\'àudio».');
       return;
     }catch(e){setStatus('Supabase error: '+e.message+' · provant local…');}
@@ -552,10 +543,22 @@ async function poll(){
   try{const r=await fetch('imetro.json',{cache:'no-store'});if(r.ok)data=await r.json();}catch(e){}
   if(!data&&window.IMETRO)data=window.IMETRO;
   if(!data){setStatus('Sense dades. Configura supabase-config.js (o executa fetch-imetro.mjs).');return;}
-  if(running&&ready)ingest(data);
+  const p=parseImetro(data); lastArrivals=p.arr; clockOffset=p.serverT-Date.now(); updateLineCounts();
+  if(running&&ready)scheduleArrivals(p.arr,p.serverT);
   else setStatus('Dades locals a punt. Prem «Activa l\'àudio».');
 }
 setInterval(poll,120000);
+// calibració compartida: prioritat edició local → Supabase (taula layout) → disposicio.json
+async function loadSharedLayout(){
+  if(Object.keys(LAY).length) return;
+  try{ if(SUPA_URL&&SUPA_KEY){
+    const r=await fetch(SUPA_URL+'/rest/v1/layout?select=data&id=eq.1',{headers:{apikey:SUPA_KEY,Authorization:'Bearer '+SUPA_KEY}});
+    if(r.ok){const rows=await r.json();const d=rows&&rows[0]&&rows[0].data;
+      if(d&&Object.keys(d).length){LAY=d;computeWarp();layout();flash('Calibració online carregada ('+Object.keys(d).length+').');return;}}
+  }}catch(e){}
+  try{const r=await fetch('disposicio.json',{cache:'no-store'});if(r.ok){const j=await r.json();
+    if(j&&Object.keys(j).length){LAY=j;computeWarp();layout();flash('Calibració (fitxer) carregada ('+Object.keys(j).length+').');}}}catch(e){}
+}
 
 /* ---- UI ---- */
 function lineKey(id){const m=/(\d+)/.exec(id);const num=m?+m[1]:999;const suf=/N$/.test(id)?0:/S$/.test(id)?1:0;return num*10+suf;}
@@ -563,7 +566,17 @@ function lineList(){const lc=document.getElementById('lines');lc.innerHTML='';
   [...LINES].sort((a,b)=>lineKey(a.id)-lineKey(b.id)).forEach(L=>{const d=document.createElement('div');d.className='ln';
     d.innerHTML=`<span class="sw" style="background:${L.color}"></span><span class="nm" style="color:${L.color}">${L.id}</span><span class="meta">${L.seq.length} est</span>`;
     d.onclick=()=>{L.on=!L.on;d.classList.toggle('off',!L.on);if(L.pathEl)L.pathEl.setAttribute('stroke-opacity',L.on?0.85:0.12);};
-    lc.appendChild(d);});}
+    lc.appendChild(d); L.metaEl=d.querySelector('.meta');});}
+function updateLineCounts(){ // nombre de trens circulant per línia (codis de servei únics)
+  const cnt={};
+  for(const a of lastArrivals){const s=STA[CODES[String(a.code)]];if(!s)continue;const L=lineFromArr(a,s);if(!L)continue;
+    (cnt[L.id]||(cnt[L.id]=new Set())).add(a.servei);}
+  for(const L of LINES){if(!L.metaEl)continue;const n=cnt[L.id]?cnt[L.id].size:0;
+    if(n>0)linesSeen.add(L.id);
+    L.metaEl.textContent = linesSeen.has(L.id)
+      ? `${L.seq.length} est · ${n} tren${n===1?'':'s'}`
+      : `${L.seq.length} est · sense dades en temps real`;}
+}
 const power=document.getElementById('power');
 power.onclick=async()=>{if(!running){await Tone.start();if(!ready)master();running=true;power.textContent='■ Atura';power.classList.add('stop');poll();}
   else{running=false;power.textContent='▶ Activa l\'àudio';power.classList.remove('stop');}};
@@ -576,6 +589,53 @@ document.getElementById('bg').onchange=e=>{if(bgImg)bgImg.setAttribute('display'
 document.getElementById('tps').onchange=e=>{useTPS=e.target.checked;layout();};
 document.getElementById('names').onchange=e=>{if(labelsG)labelsG.setAttribute('display',e.target.checked?'inline':'none');};
 document.getElementById('cal').onchange=e=>setEditMode(e.target.checked);
+document.getElementById('fsbtn').onclick=()=>{const st=document.querySelector('.stage');
+  if(!document.fullscreenElement){(st.requestFullscreen||st.webkitRequestFullscreen||function(){}).call(st);}
+  else{(document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document);}};
+
+/* ---- diàleg de contrasenya (ocult + casella per mostrar-la) ---- */
+function askPassword(title){
+  return new Promise(resolve=>{
+    const ov=document.createElement('div'); ov.className='pwoverlay';
+    ov.innerHTML='<div class="pwbox"><div class="pwtitle"></div>'+
+      '<input type="password" class="pwinput" autocomplete="current-password" />'+
+      '<label class="pwshow"><input type="checkbox"> Mostra la contrasenya</label>'+
+      '<div class="pwbtns"><button class="btn" data-a="x">Cancel·la</button><button class="btn save" data-a="ok">D\'acord</button></div></div>';
+    ov.querySelector('.pwtitle').textContent=title||'Contrasenya';
+    document.body.appendChild(ov);
+    const inp=ov.querySelector('.pwinput'), chk=ov.querySelector('.pwshow input');
+    inp.focus();
+    chk.onchange=()=>{inp.type=chk.checked?'text':'password';};
+    const done=v=>{ov.remove();resolve(v);};
+    ov.querySelector('[data-a="ok"]').onclick=()=>done(inp.value);
+    ov.querySelector('[data-a="x"]').onclick=()=>done(null);
+    inp.addEventListener('keydown',e=>{if(e.key==='Enter')done(inp.value);else if(e.key==='Escape')done(null);});
+    ov.addEventListener('mousedown',e=>{if(e.target===ov)done(null);});
+  });
+}
+
+/* ---- diàleg de login (usuari + contrasenya, mateix estil) ---- */
+function askLogin(title){
+  return new Promise(resolve=>{
+    const ov=document.createElement('div'); ov.className='pwoverlay';
+    ov.innerHTML='<div class="pwbox"><div class="pwtitle"></div>'+
+      '<input type="text" class="pwinput" autocomplete="username" placeholder="Usuari" />'+
+      '<input type="password" class="pwinput" autocomplete="current-password" placeholder="Contrasenya" style="margin-top:8px" />'+
+      '<label class="pwshow"><input type="checkbox"> Mostra la contrasenya</label>'+
+      '<div class="pwbtns"><button class="btn" data-a="x">Cancel·la</button><button class="btn save" data-a="ok">Entra</button></div></div>';
+    ov.querySelector('.pwtitle').textContent=title||'Accés admin';
+    document.body.appendChild(ov);
+    const ins=ov.querySelectorAll('.pwinput'), userI=ins[0], passI=ins[1], chk=ov.querySelector('.pwshow input');
+    userI.focus();
+    chk.onchange=()=>{passI.type=chk.checked?'text':'password';};
+    const done=v=>{ov.remove();resolve(v);};
+    ov.querySelector('[data-a="ok"]').onclick=()=>done({user:userI.value,pass:passI.value});
+    ov.querySelector('[data-a="x"]').onclick=()=>done(null);
+    const onKey=e=>{if(e.key==='Enter')done({user:userI.value,pass:passI.value});else if(e.key==='Escape')done(null);};
+    userI.addEventListener('keydown',onKey); passI.addEventListener('keydown',onKey);
+    ov.addEventListener('mousedown',e=>{if(e.target===ov)done(null);});
+  });
+}
 
 /* ---- mode admin (protegit per hash SHA-256) ---- */
 const ADMIN_HASH=(typeof window!=='undefined'&&window.ADMIN_HASH)||'';
@@ -598,19 +658,33 @@ function applyMode(){
   }
   layout();
 }
-document.getElementById('adminBtn').onclick=async()=>{
-  const btn=document.getElementById('adminBtn');
-  if(!admin){
-    const p=prompt('Contrasenya admin:'); if(p==null)return;
-    const ok = ADMIN_HASH && (await sha256(p))===ADMIN_HASH;
-    if(ok){admin=true;btn.textContent='Admin ✓';btn.classList.add('on');applyMode();}
-    else alert('Contrasenya incorrecta.');
-  }else{admin=false;btn.textContent='Admin';btn.classList.remove('on');applyMode();}
-};
+const adminBtnEl=document.getElementById('adminBtn');
+function setAdmin(v){admin=v;adminBtnEl.textContent=v?'Admin ✓':'Admin';adminBtnEl.classList.toggle('on',v);applyMode();}
+if(sb){
+  // PAS 4: autenticació real amb Supabase (admin = sessió vàlida)
+  sb.auth.getSession().then(({data})=>setAdmin(!!data.session));
+  sb.auth.onAuthStateChange((_e,session)=>setAdmin(!!session));
+  adminBtnEl.onclick=async()=>{
+    if(admin){await sb.auth.signOut();return;}
+    const cred=await askLogin('Accés admin'); if(!cred||!cred.user)return;
+    // nom d'usuari → email: si no porta "@", s'afegeix el domini fix
+    const email=cred.user.includes('@')?cred.user:(cred.user.trim()+'@'+(window.ADMIN_EMAIL_DOMAIN||'audiometro.local'));
+    const {error}=await sb.auth.signInWithPassword({email,password:cred.pass});
+    if(error)alert('Accés denegat: '+error.message);
+  };
+}else{
+  // fallback sense Supabase: gate per hash SHA-256 (cosmètic)
+  adminBtnEl.onclick=async()=>{
+    if(admin){setAdmin(false);return;}
+    const p=await askPassword('Contrasenya admin'); if(p==null)return;
+    if(ADMIN_HASH&&(await sha256(p))===ADMIN_HASH)setAdmin(true); else alert('Contrasenya incorrecta.');
+  };
+}
 
 buildNet();computeWarp();render();lineList();fitToImage(IMG_SRC);
 applyMode();   // arrenca en mode USUARI
 if(Object.keys(LAY).length) flash('Disposició desada carregada ('+Object.keys(LAY).length+').');
+loadSharedLayout();   // calibració compartida: Supabase (online) → si no, disposicio.json
 poll();
 requestAnimationFrame(step);
 </script>

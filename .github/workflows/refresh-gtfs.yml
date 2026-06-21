@@ -1,0 +1,37 @@
+name: refresh-gtfs
+# Refresca l'horari GTFS (L9/L10) a Supabase, setmanalment. Autònom.
+on:
+  schedule:
+    - cron: '30 3 * * 1'   # cada dilluns 03:30 UTC
+  workflow_dispatch: {}     # i manualment quan vulguis
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Resol i baixa l'últim GTFS (Mobility Database)
+        env:
+          MOBILITY_REFRESH_TOKEN: ${{ secrets.MOBILITY_REFRESH_TOKEN }}
+          MDB_FEED: mdb-2359   # feed de TMB
+        run: |
+          ACCESS=$(curl -fsSL -X POST 'https://api.mobilitydatabase.org/v1/tokens' \
+            -H 'Content-Type: application/json' \
+            -d "{\"refresh_token\":\"$MOBILITY_REFRESH_TOKEN\"}" | jq -r '.access_token')
+          URL=$(curl -fsSL "https://api.mobilitydatabase.org/v1/gtfs_feeds/$MDB_FEED/datasets?latest=true" \
+            -H "Authorization: Bearer $ACCESS" \
+            | jq -r 'if type=="array" then .[0].hosted_url else .hosted_url end')
+          echo "GTFS latest → $URL"
+          curl -fsSL "$URL" -o gtfs.zip
+          mkdir -p gtfs && unzip -o -q gtfs.zip -d gtfs
+      - name: Genera horari → Supabase (gtfs_schedule)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          GTFSDIR=$(dirname "$(find gtfs -name routes.txt | head -1)")
+          echo "GTFS a: $GTFSDIR"
+          node scripts/build-schedule.mjs "$GTFSDIR"
