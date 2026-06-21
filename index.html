@@ -437,7 +437,7 @@ function scheduleArrivals(arr,serverT){
   let added=0,skipped=0;
   for(const k in groups){const g=groups[k].sort((x,y)=>x.tArr-y.tArr);
     for(let i=0;i<g.length;i++){const a=g[i];const s=codeToStation(a.code);if(!s){skipped++;continue;}
-      const id=a.code+'_'+a.sentit+'_'+a.servei;if(seen.has(id))continue;
+      const id=a.code+'_'+Math.round(a.tArr/1000);if(seen.has(id))continue; // 1 impuls per estació i segon (evita duplicats)
       const delay=(a.tArr-wallNow)/1000;if(delay<-2||delay>180)continue; // horitzó ~3 min (refresc cada 2 min, amb marge)
       const headway=i+1<g.length?(g[i+1].tArr-a.tArr)/1000:NaN;
       const jit=(hashUnit(id)-0.5)*0.9;  // dither sub-segon estable per tren: trenca la graella d'1 s (dades de TMB al segon)
