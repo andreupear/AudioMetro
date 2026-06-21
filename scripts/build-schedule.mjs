@@ -25,15 +25,26 @@ const toSec = hms => { const [h,m,s]=hms.split(':').map(Number); return h*3600+m
 
 // rutes
 const routeLine={}; for(const r of readCSV('routes.txt')) if(LINES_WANT.has(r.route_short_name)) routeLine[r.route_id]=r.route_short_name;
-// dies per servei (calendar.txt). NO filtrem per dates: el mirall del GTFS pot estar desfasat
-// (períodes ja caducats) i ens deixaria sense trens. Els clons de períodes solapats els elimina
-// la dedup per horari de més avall (fusionant els dies de cada clon).
+// dies per servei (calendar.txt) — UN SOL període de servei, per no acumular clons setmanals.
+// Usem avui; però si el mirall del GTFS està desfasat (avui fora de la seva cobertura), retallem
+// a la data més recent que el feed cobreix. Així sempre hi ha trens i sense duplicar períodes.
+const cal = exists('calendar.txt') ? readCSV('calendar.txt') : [];
+const z=n=>String(n).padStart(2,'0'); const _d=new Date();
+const TODAY=+`${_d.getFullYear()}${z(_d.getMonth()+1)}${z(_d.getDate())}`;
+let minStart=Infinity,maxEnd=-Infinity;
+for(const c of cal){const sd=+c.start_date,ed=+c.end_date;if(sd)minStart=Math.min(minStart,sd);if(ed)maxEnd=Math.max(maxEnd,ed);}
+const D = (isFinite(minStart)&&isFinite(maxEnd)) ? Math.min(Math.max(TODAY,minStart),maxEnd) : TODAY;
 const dow={};
-if(exists('calendar.txt')) for(const c of readCSV('calendar.txt')){let m=0;
+for(const c of cal){const sd=+c.start_date,ed=+c.end_date;
+  if(sd&&ed&&(D<sd||D>ed))continue;            // fora del període vigent (relatiu a D) → fora
+  let m=0;
   if(c.sunday==='1')m|=1;if(c.monday==='1')m|=2;if(c.tuesday==='1')m|=4;if(c.wednesday==='1')m|=8;
   if(c.thursday==='1')m|=16;if(c.friday==='1')m|=32;if(c.saturday==='1')m|=64;dow[c.service_id]=m;}
+console.log(`Servei: data usada ${D} (avui ${TODAY}; feed ${isFinite(minStart)?minStart:'-'}–${isFinite(maxEnd)?maxEnd:'-'}) · serveis vigents: ${Object.keys(dow).length}`);
+const noCal = cal.length===0;
 const trips={}; for(const t of readCSV('trips.txt')){const line=routeLine[t.route_id];if(!line)continue;
-  trips[t.trip_id]={line,sentit:t.direction_id==='0'?1:2,desti:t.trip_headsign,mask:dow[t.service_id]??127};}
+  const mask = noCal ? 127 : dow[t.service_id]; if(mask==null)continue;   // servei fora del període → fora
+  trips[t.trip_id]={line,sentit:t.direction_id==='0'?1:2,desti:t.trip_headsign,mask};}
 // stops
 const stopName={}; for(const s of readCSV('stops.txt')) stopName[s.stop_id]=s.stop_name;
 // nom → codi (network.json)

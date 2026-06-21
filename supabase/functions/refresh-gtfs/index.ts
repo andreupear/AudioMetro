@@ -52,21 +52,30 @@ Deno.serve(async () => {
     const routeLine: Record<string,string> = {};
     for (const r of rows(files["routes.txt"])) if (LINES_WANT.has(r.route_short_name)) routeLine[r.route_id] = r.route_short_name;
 
-    // 3) màscara de dies per servei (calendar.txt). NO filtrem per dates: el mirall del GTFS pot
-    // estar desfasat i ens deixaria sense trens. Els clons els elimina la dedup per horari (6b).
+    // 3) màscara de dies per servei (calendar.txt) — UN SOL període: avui, o el més recent que el
+    // feed cobreix si està desfasat. Així no s'acumulen clons setmanals i sempre hi ha trens.
+    const cal = files["calendar.txt"] ? rows(files["calendar.txt"]) : [];
+    const z = (n:number)=>String(n).padStart(2,"0"); const _d = new Date();
+    const TODAY = +`${_d.getFullYear()}${z(_d.getMonth()+1)}${z(_d.getDate())}`;
+    let minStart = Infinity, maxEnd = -Infinity;
+    for (const c of cal) { const sd=+c.start_date, ed=+c.end_date; if(sd)minStart=Math.min(minStart,sd); if(ed)maxEnd=Math.max(maxEnd,ed); }
+    const D = (isFinite(minStart)&&isFinite(maxEnd)) ? Math.min(Math.max(TODAY,minStart),maxEnd) : TODAY;
     const dow: Record<string,number> = {};
-    if (files["calendar.txt"]) for (const c of rows(files["calendar.txt"])) {
+    for (const c of cal) {
+      const sd=+c.start_date, ed=+c.end_date; if (sd && ed && (D<sd || D>ed)) continue;
       let m = 0;
       if (c.sunday==="1")m|=1; if (c.monday==="1")m|=2; if (c.tuesday==="1")m|=4; if (c.wednesday==="1")m|=8;
       if (c.thursday==="1")m|=16; if (c.friday==="1")m|=32; if (c.saturday==="1")m|=64;
       dow[c.service_id] = m;
     }
+    const noCal = cal.length === 0;
 
-    // 4) trips de les nostres rutes
+    // 4) trips de les nostres rutes (només del període vigent)
     const trips: Record<string,{line:string;sentit:number;desti:string;mask:number}> = {};
     for (const t of rows(files["trips.txt"])) {
       const line = routeLine[t.route_id]; if (!line) continue;
-      trips[t.trip_id] = { line, sentit: t.direction_id==="0"?1:2, desti: t.trip_headsign, mask: dow[t.service_id] ?? 127 };
+      const mask = noCal ? 127 : dow[t.service_id]; if (mask == null) continue;
+      trips[t.trip_id] = { line, sentit: t.direction_id==="0"?1:2, desti: t.trip_headsign, mask };
     }
 
     // 5) stop_id → nom
