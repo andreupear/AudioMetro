@@ -4,7 +4,7 @@ Sonificació en temps real de la xarxa de Metro de Barcelona com a organisme son
 Cada arribada de tren és un impuls (gest "neurona") que sona i encén la seva estació al mapa.
 Dades reals de l'API iMetro de TMB, servides via Supabase.
 
-🌐 **Producció:** audiometro.andreuperello.cat
+🌐 **Producció:** [audiometro.andreuperello.cat](https://audiometro.andreuperello.cat)
 
 ---
 
