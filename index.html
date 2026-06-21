@@ -362,7 +362,10 @@ function startDrag(ev,s){if(!editOn)return;ev.preventDefault();ev.stopPropagatio
    Ampliant = la finestra entra dins el mapa i omple tota la pantalla. */
 let vb={x:0,y:0,w:VBW,h:VBH};
 let view={cx:VBW/2,cy:VBH/2,zw:VBW};   // centre (unitats de mapa) + amplada visible
-function elemAspect(){const r=svg.getBoundingClientRect();return (r.width>0&&r.height>0)?r.height/r.width:VBH/VBW;}
+function inFS(){const s=document.querySelector('.stage');return !!document.fullscreenElement||(s&&s.classList.contains('fs'));}
+function elemAspect(){
+  if(!inFS())return VBH/VBW;                 // fora de pantalla completa: aspecte fix del mapa (mai barres)
+  const r=svg.getBoundingClientRect();return (r.width>0&&r.height>0)?r.height/r.width:VBH/VBW;}
 function applyVB(){
   const A=elemAspect(), maxW=Math.max(VBW,VBH/A), minW=VBW*0.12;
   let w=clamp(view.zw,minW,maxW), h=w*A;
