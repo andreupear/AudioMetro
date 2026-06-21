@@ -25,31 +25,38 @@ const toSec = hms => { const [h,m,s]=hms.split(':').map(Number); return h*3600+m
 
 // rutes
 const routeLine={}; for(const r of readCSV('routes.txt')) if(LINES_WANT.has(r.route_short_name)) routeLine[r.route_id]=r.route_short_name;
-// dies per servei (calendar.txt) — UN SOL període, però triat entre els serveis QUE TENEN TRENS.
-// (El mirall pot ser vell i tenir serveis "de futur" buits que cobreixen avui; si filtréssim per
-//  avui sec, ens quedaríem sense trens. Per això clampem la data a la finestra dels serveis amb trens.)
-const cal = exists('calendar.txt') ? readCSV('calendar.txt') : [];
-const calMap={};
-for(const c of cal){let m=0;
-  if(c.sunday==='1')m|=1;if(c.monday==='1')m|=2;if(c.tuesday==='1')m|=4;if(c.wednesday==='1')m|=8;
-  if(c.thursday==='1')m|=16;if(c.friday==='1')m|=32;if(c.saturday==='1')m|=64;
-  calMap[c.service_id]={m,sd:+c.start_date||0,ed:+c.end_date||0};}
-// trips crus de les nostres rutes + serveis que realment s'usen
+// dies per servei. TMB defineix el servei de L9/L10 amb calendar_dates.txt (una entrada per data
+// d'operació), no amb calendar.txt. Construïm una SETMANA REPRESENTATIVA: per a cada dia de la
+// setmana agafem la seva data més recent amb trens i li assignem aquell dia. Així hi ha dades,
+// es preserva feiner/cap de setmana i queda un sol clon per tren.
+const cal    = exists('calendar.txt')       ? readCSV('calendar.txt')       : [];
+const cdates = exists('calendar_dates.txt') ? readCSV('calendar_dates.txt') : [];
+// trips crus + serveis usats
 const rawTrips=[]; const usedSids=new Set();
 for(const t of readCSV('trips.txt')){const line=routeLine[t.route_id];if(!line)continue;
   rawTrips.push({id:t.trip_id,sid:t.service_id,line,sentit:t.direction_id==='0'?1:2,desti:t.trip_headsign});
   usedSids.add(t.service_id);}
 const z=n=>String(n).padStart(2,'0'); const _d=new Date();
 const TODAY=+`${_d.getFullYear()}${z(_d.getMonth()+1)}${z(_d.getDate())}`;
-let uMin=Infinity,uMax=-Infinity;
-for(const sid of usedSids){const c=calMap[sid];if(c){if(c.sd)uMin=Math.min(uMin,c.sd);if(c.ed)uMax=Math.max(uMax,c.ed);}}
-const D = (isFinite(uMin)&&isFinite(uMax)) ? Math.min(Math.max(TODAY,uMin),uMax) : TODAY;  // avui, retallat a on hi ha trens
-console.log(`Servei: data usada ${D} (avui ${TODAY}; trens del feed ${isFinite(uMin)?uMin:'-'}–${isFinite(uMax)?uMax:'-'})`);
-const noCal = cal.length===0;
+const wdayOf=ymd=>{const s=String(ymd);return new Date(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8)).getDay();}; // 0=dg..6=ds
+const dow={};   // service_id → màscara de dies
+// via A — calendar_dates.txt (exception_type=1 = circula aquell dia), només serveis amb trens
+const dateSv={};
+for(const e of cdates){ if(e.exception_type!=='1')continue; if(!usedSids.has(e.service_id))continue;
+  (dateSv[+e.date]||(dateSv[+e.date]=new Set())).add(e.service_id); }
+const datesWithSv=Object.keys(dateSv).map(Number).sort((a,b)=>a-b);
+const chosen={};  // dia_setmana → data representativa
+for(const d of datesWithSv){ if(d>TODAY)continue; const wd=wdayOf(d); if(chosen[wd]==null||d>chosen[wd]) chosen[wd]=d; } // més recent ≤ avui
+for(const d of datesWithSv){ const wd=wdayOf(d); if(chosen[wd]==null) chosen[wd]=d; }                                  // si cap ≤ avui, la més propera
+for(const wd in chosen){ const d=chosen[wd]; const bit=1<<wdayOf(d); for(const sid of dateSv[d]) dow[sid]=(dow[sid]||0)|bit; }
+// via B — calendar.txt per als serveis que no surtin per dates
+for(const c of cal){ if(dow[c.service_id]!=null)continue; let m=0;
+  if(c.sunday==='1')m|=1;if(c.monday==='1')m|=2;if(c.tuesday==='1')m|=4;if(c.wednesday==='1')m|=8;
+  if(c.thursday==='1')m|=16;if(c.friday==='1')m|=32;if(c.saturday==='1')m|=64;dow[c.service_id]=m;}
+const noInfo=Object.keys(dow).length===0;
+console.log(`Servei: avui ${TODAY} · dates amb trens: ${datesWithSv.length} · setmana representativa: ${Object.values(chosen).sort().join(',')||'(cap)'}`);
 const trips={};
-for(const t of rawTrips){const c=calMap[t.sid];
-  const mask = noCal ? 127 : (c && (!c.sd||!c.ed||(D>=c.sd&&D<=c.ed)) ? c.m : null);
-  if(mask==null)continue;                       // servei fora del període triat → fora
+for(const t of rawTrips){ const mask = noInfo?127:(dow[t.sid]||0); if(!mask)continue;
   trips[t.id]={line:t.line,sentit:t.sentit,desti:t.desti,mask};}
 // stops
 const stopName={}; for(const s of readCSV('stops.txt')) stopName[s.stop_id]=s.stop_name;

@@ -52,17 +52,11 @@ Deno.serve(async () => {
     const routeLine: Record<string,string> = {};
     for (const r of rows(files["routes.txt"])) if (LINES_WANT.has(r.route_short_name)) routeLine[r.route_id] = r.route_short_name;
 
-    // 3) calendar.txt → map servei → {mask, dates}. Triem UN període entre els serveis QUE TENEN TRENS
-    // (el mirall pot tenir serveis "de futur" buits que cobreixen avui; per això clampem a on hi ha trens).
-    const cal = files["calendar.txt"] ? rows(files["calendar.txt"]) : [];
-    const calMap: Record<string,{m:number;sd:number;ed:number}> = {};
-    for (const c of cal) {
-      let m = 0;
-      if (c.sunday==="1")m|=1; if (c.monday==="1")m|=2; if (c.tuesday==="1")m|=4; if (c.wednesday==="1")m|=8;
-      if (c.thursday==="1")m|=16; if (c.friday==="1")m|=32; if (c.saturday==="1")m|=64;
-      calMap[c.service_id] = { m, sd:+c.start_date||0, ed:+c.end_date||0 };
-    }
-    // 4) trips crus de les nostres rutes + serveis usats
+    // 3) dies de servei. TMB usa calendar_dates.txt (una entrada per data) per a L9/L10. Construïm una
+    // SETMANA REPRESENTATIVA: per cada dia de la setmana, la seva data més recent amb trens → aquell dia.
+    const cal    = files["calendar.txt"]       ? rows(files["calendar.txt"])       : [];
+    const cdates = files["calendar_dates.txt"] ? rows(files["calendar_dates.txt"]) : [];
+    // 4) trips crus + serveis usats
     const rawTrips: {id:string;sid:string;line:string;sentit:number;desti:string}[] = [];
     const usedSids = new Set<string>();
     for (const t of rows(files["trips.txt"])) {
@@ -72,15 +66,23 @@ Deno.serve(async () => {
     }
     const z = (n:number)=>String(n).padStart(2,"0"); const _d = new Date();
     const TODAY = +`${_d.getFullYear()}${z(_d.getMonth()+1)}${z(_d.getDate())}`;
-    let uMin = Infinity, uMax = -Infinity;
-    for (const sid of usedSids) { const c = calMap[sid]; if (c) { if(c.sd)uMin=Math.min(uMin,c.sd); if(c.ed)uMax=Math.max(uMax,c.ed); } }
-    const D = (isFinite(uMin)&&isFinite(uMax)) ? Math.min(Math.max(TODAY,uMin),uMax) : TODAY;
-    const noCal = cal.length === 0;
+    const wdayOf = (ymd:number)=>{const s=String(ymd);return new Date(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8)).getDay();};
+    const dow: Record<string,number> = {};
+    const dateSv: Record<number,Set<string>> = {};
+    for (const e of cdates) { if (e.exception_type!=="1") continue; if (!usedSids.has(e.service_id)) continue;
+      (dateSv[+e.date] || (dateSv[+e.date]=new Set())).add(e.service_id); }
+    const datesWithSv = Object.keys(dateSv).map(Number).sort((a,b)=>a-b);
+    const chosen: Record<number,number> = {};
+    for (const d of datesWithSv) { if (d>TODAY) continue; const wd=wdayOf(d); if (chosen[wd]==null||d>chosen[wd]) chosen[wd]=d; }
+    for (const d of datesWithSv) { const wd=wdayOf(d); if (chosen[wd]==null) chosen[wd]=d; }
+    for (const wd in chosen) { const d=chosen[wd]; const bit=1<<wdayOf(d); for (const sid of dateSv[d]) dow[sid]=(dow[sid]||0)|bit; }
+    for (const c of cal) { if (dow[c.service_id]!=null) continue; let m=0;
+      if (c.sunday==="1")m|=1; if (c.monday==="1")m|=2; if (c.tuesday==="1")m|=4; if (c.wednesday==="1")m|=8;
+      if (c.thursday==="1")m|=16; if (c.friday==="1")m|=32; if (c.saturday==="1")m|=64; dow[c.service_id]=m; }
+    const noInfo = Object.keys(dow).length === 0;
     const trips: Record<string,{line:string;sentit:number;desti:string;mask:number}> = {};
     for (const t of rawTrips) {
-      const c = calMap[t.sid];
-      const mask = noCal ? 127 : (c && (!c.sd || !c.ed || (D>=c.sd && D<=c.ed)) ? c.m : null);
-      if (mask == null) continue;
+      const mask = noInfo ? 127 : (dow[t.sid] || 0); if (!mask) continue;
       trips[t.id] = { line:t.line, sentit:t.sentit, desti:t.desti, mask };
     }
 
