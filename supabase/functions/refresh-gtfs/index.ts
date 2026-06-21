@@ -52,29 +52,36 @@ Deno.serve(async () => {
     const routeLine: Record<string,string> = {};
     for (const r of rows(files["routes.txt"])) if (LINES_WANT.has(r.route_short_name)) routeLine[r.route_id] = r.route_short_name;
 
-    // 3) màscara de dies per servei (calendar.txt)
+    // 3) màscara de dies per servei (calendar.txt) — NOMÉS el període vigent avui (start_date..end_date).
+    // TMB publica diversos períodes solapats; sense filtrar per dates cada sortida es clona ~10×.
+    const z = (n:number)=>String(n).padStart(2,"0");
+    const _d = new Date();
+    const TODAY = +`${_d.getFullYear()}${z(_d.getMonth()+1)}${z(_d.getDate())}`;
     const dow: Record<string,number> = {};
     if (files["calendar.txt"]) for (const c of rows(files["calendar.txt"])) {
+      const sd = +c.start_date, ed = +c.end_date;
+      if (sd && ed && (TODAY < sd || TODAY > ed)) continue;   // període caducat o futur → fora
       let m = 0;
       if (c.sunday==="1")m|=1; if (c.monday==="1")m|=2; if (c.tuesday==="1")m|=4; if (c.wednesday==="1")m|=8;
       if (c.thursday==="1")m|=16; if (c.friday==="1")m|=32; if (c.saturday==="1")m|=64;
       dow[c.service_id] = m;
     }
 
-    // 4) trips de les nostres rutes
+    // 4) trips de les nostres rutes (descarta serveis fora del període vigent; sense fallback ??127)
     const trips: Record<string,{line:string;sentit:number;desti:string;mask:number}> = {};
     for (const t of rows(files["trips.txt"])) {
       const line = routeLine[t.route_id]; if (!line) continue;
-      trips[t.trip_id] = { line, sentit: t.direction_id==="0"?1:2, desti: t.trip_headsign, mask: dow[t.service_id] ?? 127 };
+      const mask = dow[t.service_id]; if (mask == null) continue;   // servei no vigent → fora
+      trips[t.trip_id] = { line, sentit: t.direction_id==="0"?1:2, desti: t.trip_headsign, mask };
     }
 
     // 5) stop_id → nom
     const stopName: Record<string,string> = {};
     for (const s of rows(files["stops.txt"])) stopName[s.stop_id] = s.stop_name;
 
-    // 6) stop_times (gran): escaneig per bytes per estalviar memòria
+    // 6) stop_times (gran): escaneig per bytes per estalviar memòria → agrupa per trip
     const buf = files["stop_times.txt"]; const dec = new TextDecoder();
-    const out: any[] = []; let start = 0, header = true;
+    const byTrip = new Map<string, any[]>(); let start = 0, header = true;
     for (let i = 0; i <= buf.length; i++) {
       if (i === buf.length || buf[i] === 10) {
         const end = (i>0 && buf[i-1]===13) ? i-1 : i;
@@ -85,9 +92,19 @@ Deno.serve(async () => {
         const tr = trips[f[0]]; if (!tr) continue;
         const name = stopName[f[3]]; if (!name) continue;
         const code = nameToCode[name]; if (code == null) continue;
-        out.push({ line: tr.line, station_code: code, sentit: tr.sentit, desti: tr.desti,
-                   depart_sec: toSec(f[2] || f[1]), dow_mask: tr.mask, trip: f[0] });
+        let a = byTrip.get(f[0]); if (!a) { a = []; byTrip.set(f[0], a); }
+        a.push({ line: tr.line, station_code: code, sentit: tr.sentit, desti: tr.desti,
+                 depart_sec: toSec(f[2] || f[1]), dow_mask: tr.mask, trip: f[0] });
       }
+    }
+
+    // 6b) DEDUP de trips clonats: mateix horari (estació:segon) → un de sol.
+    const seenSig = new Set<string>(); const out: any[] = []; let clones = 0;
+    for (const recs of byTrip.values()) {
+      recs.sort((x,y)=>x.depart_sec-y.depart_sec);
+      const sig = recs[0].line + "|" + recs.map(r=>r.station_code+":"+r.depart_sec).join(",");
+      if (seenSig.has(sig)) { clones++; continue; }
+      seenSig.add(sig); for (const r of recs) out.push(r);
     }
 
     // 7) reemplaça la taula
@@ -97,7 +114,7 @@ Deno.serve(async () => {
       if (error) return new Response("DB insert: " + error.message, { status: 500 });
     }
     return new Response(JSON.stringify({ ok: true, files: Object.keys(files).length, rows: out.length,
-      lines: [...new Set(out.map(r=>r.line))] }), { headers: { "Content-Type": "application/json" } });
+      trips: byTrip.size, clones, lines: [...new Set(out.map(r=>r.line))] }), { headers: { "Content-Type": "application/json" } });
   } catch (e) {
     return new Response("Error: " + String((e as any)?.message ?? e), { status: 500 });
   }
