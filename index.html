@@ -661,15 +661,19 @@ function updateLineCounts(){ // nombre de trens reals per línia
   // union-find sobre codi_servei: dos serveis que comparteixen una sortida EXACTA
   // (estació+sentit+segon) són clons del MATEIX tren físic → s'uneixen. Així el compte
   // és real encara que el GTFS porti trips clonats amb ids diferents.
-  const parent={},lineOf={},evt={};
+  const parent={},lineOf={},byStop={};
   const find=x=>{while(parent[x]!==x){parent[x]=parent[parent[x]];x=parent[x];}return x;};
   const uni=(a,b)=>{a=find(a);b=find(b);if(a!==b)parent[a]=b;};
   for(const a of lastArrivals){const s=STA[CODES[String(a.code)]];if(!s)continue;const L=lineFromArr(a,s);if(!L)continue;
     const sv=(a.servei==null||a.servei==='')?('t'+a.code+'_'+a.sentit+'_'+Math.round(a.tArr/1000)):('s'+a.servei);
     if(parent[sv]===undefined)parent[sv]=sv;
     lineOf[sv]=L.id;
-    const k=a.code+'_'+a.sentit+'_'+Math.round(a.tArr/1000);  // una sortida física concreta
-    if(evt[k]!==undefined)uni(sv,evt[k]); else evt[k]=sv;}
+    (byStop[a.code+'_'+a.sentit]||(byStop[a.code+'_'+a.sentit]=[])).push({sv,t:a.tArr});}
+  // a cada estació+sentit, els serveis que arriben molt junts (< NEAR) són el mateix tren (clons
+  // d'horari amb deriva de pocs segons). Els trens reals van molt més separats, així que no es toquen.
+  const NEAR=90000; // 90 s
+  for(const k in byStop){const l=byStop[k].sort((x,y)=>x.t-y.t);let aT=-1e15,aSv=null;
+    for(const e of l){ if(aSv!==null && e.t-aT<NEAR) uni(e.sv,aSv); else {aSv=e.sv;aT=e.t;} }}
   const cnt={};
   for(const sv in parent){const lid=lineOf[sv];(cnt[lid]||(cnt[lid]=new Set())).add(find(sv));}
   for(const L of LINES){if(!L.metaEl)continue;const n=cnt[L.id]?cnt[L.id].size:0;
