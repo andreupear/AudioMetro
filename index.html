@@ -122,7 +122,7 @@
         <li><b>Detune → direcció.</b> Segons el sentit, la nota es desafina ±7 cents (7 centèsimes de semitò): un sentit baixa lleugeríssimament el to i l'altre el puja.</li>
         <li><b>Brillantor i durada → freqüència de pas.</b> Com més sovint passa una línia, el so és més brillant i curt; com més espaiada, més fosc i llarg.</li>
         <li><b>Registre i energia → centralitat.</b> Els intercanviadors sonen una o dues octaves més greus, amb més volum i una cua més llarga (més ressonants).</li>
-        <li><b>Reforç → coincidències.</b> Quan diverses arribades cauen alhora, s'afegeix un accent greu (una octava per sota) i puja el volum.</li>
+        <li><b>Reforç → coincidències.</b> Quan dues arribades cauen gairebé alhora (a menys de ~60 ms), s'afegeix un accent greu (una octava per sota) i puja el volum. Com que els trens es reparteixen al llarg del segon, ja gairebé no coincideixen exactament; passa de tant en tant, sobretot en moments de molta densitat.</li>
         <li><b>Ambient → densitat.</b> Com més arribades per minut, el so global es torna més brillant i amb menys reverberació; el pols del dia es nota sol.</li>
       </ul>
     </details>
@@ -503,7 +503,7 @@ function parseImetro(raw){const serverT=raw.timestamp||Date.now();const arr=[];
         for(const t of (tr.propers_trens||[])) arr.push({code,lineId,sentit,desti,servei:t.codi_servei,tArr:t.temps_arribada});}}}
   return {serverT,arr};}
 
-let SCHED=[],seen=new Set(),demoSpeed=1,emitCount=0;
+let SCHED=[],seen=new Set(),demoSpeed=1;
 // hash estable d'una cadena → [0,1) (FNV-1a) per al dither sub-segon
 function hashUnit(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return (h>>>0)%100000/100000;}
 let lastArrivals=[],clockOffset=0,didDrag=false;
@@ -518,12 +518,19 @@ function scheduleArrivals(arr,serverT){
   let added=0,skipped=0;
   for(const k in groups){const g=groups[k].sort((x,y)=>x.tArr-y.tArr);
     for(let i=0;i<g.length;i++){const a=g[i];const s=codeToStation(a.code);if(!s){skipped++;continue;}
-      const id=a.code+'_'+Math.round(a.tArr/1000);if(seen.has(id))continue; // 1 impuls per estació i segon (evita duplicats)
+      // DEDUP robust (evita el mateix impuls repetit a poca distància entre crides):
+      //  · tKey  = estació+sentit+segon → descarta clons exactes (mateix instant)
+      //  · svKey = estació+sentit+codi_servei+franja30min → descarta el MATEIX tren tornat a programar
+      //    quan la predicció de TMB es desplaça uns segons d'una crida a la següent.
+      const tKey=a.code+'_'+a.sentit+'_'+Math.round(a.tArr/1000);
+      const svKey=(a.servei!=null&&a.servei!=='')?a.code+'_'+a.sentit+'_'+a.servei+'_'+Math.floor(a.tArr/1800000):null;
+      if(seen.has(tKey)||(svKey&&seen.has(svKey)))continue;
       const delay=(a.tArr-wallNow)/1000;if(delay<-2||delay>180)continue; // horitzó ~3 min (refresc cada 2 min, amb marge)
       const headway=i+1<g.length?(g[i+1].tArr-a.tArr)/1000:NaN;
+      const id=svKey||tKey;
       const jit=(hashUnit(id)-0.5)*0.9;  // dither sub-segon estable per tren: trenca la graella d'1 s (dades de TMB al segon)
       SCHED.push({s,lineId:a.lineId||a.line,sentit:a.sentit,desti:a.desti,tArr:a.tArr,headway,tAudio:audioNow+Math.max(0,delay+jit)/demoSpeed,id});
-      seen.add(id);added++;}}
+      seen.add(tKey);if(svKey)seen.add(svKey);added++;}}
   if(seen.size>5000)seen=new Set();
   SCHED.sort((x,y)=>x.tAudio-y.tAudio);
   setStatus(`Arribades: ${arr.length} · ${added} prog · ${skipped} sense codi · ${new Date(serverT).toLocaleTimeString()}`);
@@ -573,7 +580,7 @@ function fireArrival(ev,t){
   if(rf){g*=1.5;accent(t,L.note,0.26);}                     // coincidència→reforç harmònic
   neuron(t,f,pan,g,hub,bright,det,durK,harm);              // harm = proximitat al final de línia
   setTimeout(()=>{s.flash=Math.max(s.flash,rf?1.4:1);},Math.max(0,(t-Tone.now())*1000));
-  fireTimes.push(performance.now());emitCount++;
+  fireTimes.push(performance.now());
   logArrival(ev,L);                                         // (#4) registre escrit (línia resolta)
 }
 
@@ -583,7 +590,8 @@ function step(){
   if(ready&&running){const a=Tone.now();
     while(SCHED.length&&SCHED[0].tAudio<a+0.1){const ev=SCHED.shift();if(ev.tAudio>=a-0.25)fireArrival(ev,Math.max(a,ev.tAudio));}
     const cut=performance.now()-60000;while(fireTimes.length&&fireTimes[0]<cut)fireTimes.shift();
-    density=Math.round(fireTimes.length*demoSpeed);            // ~arribades/min reals
+    density=Math.round(fireTimes.length*demoSpeed);            // ~arribades/min reals (impulsos l'últim minut)
+    epsShown=fireTimes.length*demoSpeed/60;                     // impulsos/s mitjanats sobre l'últim minut
     const d01=clamp(density/120,0,1);
     if(mFilt)mFilt.frequency.rampTo(2000+8000*d01,0.5);
     if(reverb)reverb.wet.rampTo(0.34-0.16*d01,0.6);
@@ -593,11 +601,12 @@ function step(){
     s.wave.setAttribute('r',(b+(1.4-f)*20+5).toFixed(1));s.wave.setAttribute('stroke-opacity',(0.6*Math.min(1,f)).toFixed(3));
     s.core.setAttribute('r',(b+f*3).toFixed(2));s.core.setAttribute('fill',f>0.5?'#fff':(s.inter?'#10131c':'#161a24'));
     s.flash*=0.90;if(s.flash<0.01){s.flash=0;s.halo.setAttribute('fill-opacity',0);s.wave.setAttribute('stroke-opacity',0);s.core.setAttribute('r',b);s.core.setAttribute('fill',s.inter?'#10131c':'#161a24');}}}
+  const eps1=epsShown.toFixed(1).replace('.',',');
   const cohEl=document.getElementById('coh'); if(cohEl)cohEl.textContent=density;
+  const epsEl=document.getElementById('eps'); if(epsEl)epsEl.textContent=eps1;
   const voicesEl=document.getElementById('voices'); if(voicesEl)voicesEl.textContent=voices;
-  const ls=document.getElementById('logstats'); if(ls)ls.textContent=density+' arribades/min · '+epsShown+' impulsos/s';
+  const ls=document.getElementById('logstats'); if(ls)ls.textContent=density+' arribades/min · '+eps1+' impulsos/s';
   requestAnimationFrame(step);}
-setInterval(()=>{epsShown=emitCount; const epsEl=document.getElementById('eps'); if(epsEl)epsEl.textContent=emitCount; emitCount=0;},1000);
 
 /* ---- càrrega de dades: Supabase (preferent) o snapshot local (fallback) ---- */
 const SUPA_URL=(typeof window!=='undefined'&&window.SUPABASE_URL)||'';
