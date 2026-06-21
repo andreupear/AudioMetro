@@ -52,27 +52,21 @@ Deno.serve(async () => {
     const routeLine: Record<string,string> = {};
     for (const r of rows(files["routes.txt"])) if (LINES_WANT.has(r.route_short_name)) routeLine[r.route_id] = r.route_short_name;
 
-    // 3) màscara de dies per servei (calendar.txt) — NOMÉS el període vigent avui (start_date..end_date).
-    // TMB publica diversos períodes solapats; sense filtrar per dates cada sortida es clona ~10×.
-    const z = (n:number)=>String(n).padStart(2,"0");
-    const _d = new Date();
-    const TODAY = +`${_d.getFullYear()}${z(_d.getMonth()+1)}${z(_d.getDate())}`;
+    // 3) màscara de dies per servei (calendar.txt). NO filtrem per dates: el mirall del GTFS pot
+    // estar desfasat i ens deixaria sense trens. Els clons els elimina la dedup per horari (6b).
     const dow: Record<string,number> = {};
     if (files["calendar.txt"]) for (const c of rows(files["calendar.txt"])) {
-      const sd = +c.start_date, ed = +c.end_date;
-      if (sd && ed && (TODAY < sd || TODAY > ed)) continue;   // període caducat o futur → fora
       let m = 0;
       if (c.sunday==="1")m|=1; if (c.monday==="1")m|=2; if (c.tuesday==="1")m|=4; if (c.wednesday==="1")m|=8;
       if (c.thursday==="1")m|=16; if (c.friday==="1")m|=32; if (c.saturday==="1")m|=64;
       dow[c.service_id] = m;
     }
 
-    // 4) trips de les nostres rutes (descarta serveis fora del període vigent; sense fallback ??127)
+    // 4) trips de les nostres rutes
     const trips: Record<string,{line:string;sentit:number;desti:string;mask:number}> = {};
     for (const t of rows(files["trips.txt"])) {
       const line = routeLine[t.route_id]; if (!line) continue;
-      const mask = dow[t.service_id]; if (mask == null) continue;   // servei no vigent → fora
-      trips[t.trip_id] = { line, sentit: t.direction_id==="0"?1:2, desti: t.trip_headsign, mask };
+      trips[t.trip_id] = { line, sentit: t.direction_id==="0"?1:2, desti: t.trip_headsign, mask: dow[t.service_id] ?? 127 };
     }
 
     // 5) stop_id → nom
@@ -98,14 +92,16 @@ Deno.serve(async () => {
       }
     }
 
-    // 6b) DEDUP de trips clonats: mateix horari (estació:segon) → un de sol.
-    const seenSig = new Set<string>(); const out: any[] = []; let clones = 0;
+    // 6b) DEDUP de trips clonats: mateix horari (estació:segon) → un de sol (fusiona els dies).
+    const sigMap = new Map<string, any[]>(); const order: any[][] = []; let clones = 0;
     for (const recs of byTrip.values()) {
       recs.sort((x,y)=>x.depart_sec-y.depart_sec);
       const sig = recs[0].line + "|" + recs.map(r=>r.station_code+":"+r.depart_sec).join(",");
-      if (seenSig.has(sig)) { clones++; continue; }
-      seenSig.add(sig); for (const r of recs) out.push(r);
+      const ex = sigMap.get(sig);
+      if (ex) { clones++; const m = recs[0].dow_mask; for (const r of ex) r.dow_mask |= m; continue; }
+      sigMap.set(sig, recs); order.push(recs);
     }
+    const out: any[] = []; for (const recs of order) for (const r of recs) out.push(r);
 
     // 7) reemplaça la taula
     await sb.from("gtfs_schedule").delete().neq("trip", "");
