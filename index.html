@@ -45,8 +45,12 @@
   .zoom button:hover{border-color:var(--accent);color:var(--accent)}
   .fsbtn{position:absolute;top:10px;left:10px;width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:rgba(18,22,34,.92);color:var(--ink);font-size:16px;cursor:pointer;z-index:5}
   .stage.fs{position:fixed;inset:0;z-index:9999;border:0;border-radius:0;background:#05060a;display:flex;align-items:center;justify-content:center}
-  .stage.fs svg{width:100%;max-height:100vh}
+  .stage.fs svg{width:100%;height:100%}
   .stage.fs .meters{position:absolute;left:0;right:0;bottom:0}
+  .stage.fs .zoom{display:flex!important}   /* botons de zoom visibles en pantalla completa */
+  .stage:fullscreen{display:flex;align-items:center;justify-content:center;background:#05060a}
+  .stage:fullscreen svg,.stage:-webkit-full-screen svg{width:100%;height:100%}
+  .stage:fullscreen .zoom{display:flex!important}
   .fsbtn:hover{border-color:var(--accent);color:var(--accent)}
   .logstats{font-size:11.5px;color:var(--accent);font-variant-numeric:tabular-nums;margin-bottom:8px}
   .meters{display:flex;gap:16px;padding:9px 14px;border-top:1px solid var(--line);flex-wrap:wrap}
@@ -341,10 +345,9 @@ function fitToImage(src){  // ajusta el viewBox a l'aspecte real de la imatge (q
   const probe=new Image();
   probe.onload=()=>{ if(!probe.naturalWidth)return;
     VBH=Math.round(VBW*probe.naturalHeight/probe.naturalWidth);
-    svg.setAttribute('viewBox',`0 0 ${VBW} ${VBH}`);
     if(bgImg)bgImg.setAttribute('height',VBH);
-    vb={x:0,y:0,w:VBW,h:VBH};
-    computeWarp(); layout();
+    view={cx:VBW/2,cy:VBH/2,zw:VBW};
+    computeWarp(); applyVB(); layout();
   };
   probe.src=src;
 }
@@ -354,31 +357,66 @@ let editOn=false,dragS=null;
 function toVB(ev){const pt=svg.createSVGPoint();pt.x=ev.clientX;pt.y=ev.clientY;const p=pt.matrixTransform(svg.getScreenCTM().inverse());return[p.x,p.y];}
 function startDrag(ev,s){if(!editOn)return;ev.preventDefault();ev.stopPropagation();dragS=s;svg.setPointerCapture(ev.pointerId);}
 
-/* ---- zoom + desplaçament (viewBox) ---- */
+/* ---- zoom + desplaçament: el viewBox segueix l'aspecte real de la pantalla ----
+   Ajustat = mapa sencer (amb barres si la pantalla és més estreta/alta).
+   Ampliant = la finestra entra dins el mapa i omple tota la pantalla. */
 let vb={x:0,y:0,w:VBW,h:VBH};
-function applyVB(){svg.setAttribute('viewBox',`${vb.x.toFixed(2)} ${vb.y.toFixed(2)} ${vb.w.toFixed(2)} ${vb.h.toFixed(2)}`);}
-function clampPan(){vb.x=Math.max(0,Math.min(VBW-vb.w,vb.x));vb.y=Math.max(0,Math.min(VBH-vb.h,vb.y));}
-function zoomBy(f,cx,cy){cx=cx==null?vb.x+vb.w/2:cx;cy=cy==null?vb.y+vb.h/2:cy;
-  let nw=vb.w*f,nh=vb.h*f;const minW=VBW*0.12,minH=VBH*0.12;
-  if(nw>VBW){nw=VBW;nh=VBH;}if(nw<minW){nw=minW;nh=minH;}
-  vb.x=cx-(cx-vb.x)*(nw/vb.w);vb.y=cy-(cy-vb.y)*(nh/vb.h);vb.w=nw;vb.h=nh;clampPan();applyVB();updateLabelScale();}
+let view={cx:VBW/2,cy:VBH/2,zw:VBW};   // centre (unitats de mapa) + amplada visible
+function elemAspect(){const r=svg.getBoundingClientRect();return (r.width>0&&r.height>0)?r.height/r.width:VBH/VBW;}
+function applyVB(){
+  const A=elemAspect(), maxW=Math.max(VBW,VBH/A), minW=VBW*0.12;
+  let w=clamp(view.zw,minW,maxW), h=w*A;
+  const cx=(w>=VBW)?VBW/2:clamp(view.cx,w/2,VBW-w/2);
+  const cy=(h>=VBH)?VBH/2:clamp(view.cy,h/2,VBH-h/2);
+  view.zw=w; view.cx=cx; view.cy=cy;
+  vb={x:cx-w/2,y:cy-h/2,w,h};
+  svg.setAttribute('viewBox',`${vb.x.toFixed(2)} ${vb.y.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}`);
+  updateLabelScale();
+}
+function zoomBy(f,atx,aty){
+  const A=elemAspect(), oldW=view.zw, oldH=oldW*A;
+  atx=atx==null?view.cx:atx; aty=aty==null?view.cy:aty;
+  const rx=(atx-(view.cx-oldW/2))/oldW, ry=(aty-(view.cy-oldH/2))/oldH;
+  const nw=clamp(oldW*f,VBW*0.12,Math.max(VBW,VBH/A)), nh=nw*A;
+  view.cx=atx-(rx-0.5)*nw; view.cy=aty-(ry-0.5)*nh; view.zw=nw;
+  applyVB();
+}
 
 let panning=false,panStart=null;
-svg.addEventListener('pointerdown',ev=>{if(dragS)return;panning=true;panStart={mx:ev.clientX,my:ev.clientY,vx:vb.x,vy:vb.y};svg.setPointerCapture(ev.pointerId);svg.style.cursor='grabbing';});
+const ptrs=new Map(); let pinchDist=0;
+function ptVB(cx,cy){const pt=svg.createSVGPoint();pt.x=cx;pt.y=cy;const p=pt.matrixTransform(svg.getScreenCTM().inverse());return[p.x,p.y];}
+function ptrDist(){const a=[...ptrs.values()];return Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);}
+function ptrMid(){const a=[...ptrs.values()];return[(a[0].x+a[1].x)/2,(a[0].y+a[1].y)/2];}
+svg.addEventListener('pointerdown',ev=>{
+  ptrs.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+  if(ptrs.size>=2){panning=false;pinchDist=ptrDist();return;}   // dos dits → pinça
+  if(dragS)return;
+  panning=true;panStart={mx:ev.clientX,my:ev.clientY,cx:view.cx,cy:view.cy};
+  try{svg.setPointerCapture(ev.pointerId);}catch(e){} svg.style.cursor='grabbing';
+});
 svg.addEventListener('pointermove',ev=>{
+  if(ptrs.has(ev.pointerId))ptrs.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+  if(ptrs.size>=2){                                              // PINCH-TO-ZOOM
+    const d=ptrDist();
+    if(pinchDist>0&&d>0){const [mx,my]=ptrMid();const [cx,cy]=ptVB(mx,my);zoomBy(clamp(pinchDist/d,0.5,2),cx,cy);}
+    pinchDist=d;return;
+  }
   if(dragS){didDrag=true;const[x,y]=toVB(ev);LAY[dragS.name]={fx:clamp(x/VBW,0,1),fy:clamp(y/VBH,0,1)};
     place(dragS);setEls(dragS);for(const id of dragS.lines){const L=BYID[id];if(L)setPath(L);}updateStatus();return;}
   if(panning){const rect=svg.getBoundingClientRect();
-    vb.x=panStart.vx-(ev.clientX-panStart.mx)*(vb.w/rect.width);
-    vb.y=panStart.vy-(ev.clientY-panStart.my)*(vb.h/rect.height);clampPan();applyVB();}
+    view.cx=panStart.cx-(ev.clientX-panStart.mx)*(vb.w/rect.width);
+    view.cy=panStart.cy-(ev.clientY-panStart.my)*(vb.h/rect.height);applyVB();}
 });
-function endPointer(){dragS=null;panning=false;svg.style.cursor=editOn?'grab':'default';}
+function endPointer(ev){if(ev&&ev.pointerId!=null)ptrs.delete(ev.pointerId);if(ptrs.size<2)pinchDist=0;
+  if(ptrs.size===0){dragS=null;panning=false;svg.style.cursor=editOn?'grab':'default';}}
 svg.addEventListener('pointerup',endPointer);
 svg.addEventListener('pointercancel',endPointer);
 svg.addEventListener('wheel',ev=>{ev.preventDefault();const[cx,cy]=toVB(ev);zoomBy(ev.deltaY<0?0.85:1.18,cx,cy);},{passive:false});
 document.getElementById('zin').onclick=()=>zoomBy(0.8);
 document.getElementById('zout').onclick=()=>zoomBy(1.25);
-document.getElementById('zfit').onclick=()=>{vb={x:0,y:0,w:VBW,h:VBH};applyVB();updateLabelScale();};
+document.getElementById('zfit').onclick=()=>{view.cx=VBW/2;view.cy=VBH/2;view.zw=1e9;applyVB();};
+window.addEventListener('resize',()=>applyVB());
+document.addEventListener('fullscreenchange',()=>requestAnimationFrame(applyVB));
 function setEditMode(on){editOn=on;
   for(const s of Object.values(STA)){
     s.hit.setAttribute('pointer-events',on?'all':'none');
@@ -638,6 +676,7 @@ document.getElementById('fsbtn').onclick=()=>{const st=document.querySelector('.
     else{(document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document);}
   } else {                          // iPhone (sense API): pantalla completa per CSS
     st.classList.toggle('fs');
+    requestAnimationFrame(applyVB);  // recalcula amb el nou aspecte de pantalla
   }};
 
 /* ---- diàleg de contrasenya (ocult + casella per mostrar-la) ---- */
