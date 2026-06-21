@@ -52,30 +52,36 @@ Deno.serve(async () => {
     const routeLine: Record<string,string> = {};
     for (const r of rows(files["routes.txt"])) if (LINES_WANT.has(r.route_short_name)) routeLine[r.route_id] = r.route_short_name;
 
-    // 3) màscara de dies per servei (calendar.txt) — UN SOL període: avui, o el més recent que el
-    // feed cobreix si està desfasat. Així no s'acumulen clons setmanals i sempre hi ha trens.
+    // 3) calendar.txt → map servei → {mask, dates}. Triem UN període entre els serveis QUE TENEN TRENS
+    // (el mirall pot tenir serveis "de futur" buits que cobreixen avui; per això clampem a on hi ha trens).
     const cal = files["calendar.txt"] ? rows(files["calendar.txt"]) : [];
-    const z = (n:number)=>String(n).padStart(2,"0"); const _d = new Date();
-    const TODAY = +`${_d.getFullYear()}${z(_d.getMonth()+1)}${z(_d.getDate())}`;
-    let minStart = Infinity, maxEnd = -Infinity;
-    for (const c of cal) { const sd=+c.start_date, ed=+c.end_date; if(sd)minStart=Math.min(minStart,sd); if(ed)maxEnd=Math.max(maxEnd,ed); }
-    const D = (isFinite(minStart)&&isFinite(maxEnd)) ? Math.min(Math.max(TODAY,minStart),maxEnd) : TODAY;
-    const dow: Record<string,number> = {};
+    const calMap: Record<string,{m:number;sd:number;ed:number}> = {};
     for (const c of cal) {
-      const sd=+c.start_date, ed=+c.end_date; if (sd && ed && (D<sd || D>ed)) continue;
       let m = 0;
       if (c.sunday==="1")m|=1; if (c.monday==="1")m|=2; if (c.tuesday==="1")m|=4; if (c.wednesday==="1")m|=8;
       if (c.thursday==="1")m|=16; if (c.friday==="1")m|=32; if (c.saturday==="1")m|=64;
-      dow[c.service_id] = m;
+      calMap[c.service_id] = { m, sd:+c.start_date||0, ed:+c.end_date||0 };
     }
-    const noCal = cal.length === 0;
-
-    // 4) trips de les nostres rutes (només del període vigent)
-    const trips: Record<string,{line:string;sentit:number;desti:string;mask:number}> = {};
+    // 4) trips crus de les nostres rutes + serveis usats
+    const rawTrips: {id:string;sid:string;line:string;sentit:number;desti:string}[] = [];
+    const usedSids = new Set<string>();
     for (const t of rows(files["trips.txt"])) {
       const line = routeLine[t.route_id]; if (!line) continue;
-      const mask = noCal ? 127 : dow[t.service_id]; if (mask == null) continue;
-      trips[t.trip_id] = { line, sentit: t.direction_id==="0"?1:2, desti: t.trip_headsign, mask };
+      rawTrips.push({ id:t.trip_id, sid:t.service_id, line, sentit:t.direction_id==="0"?1:2, desti:t.trip_headsign });
+      usedSids.add(t.service_id);
+    }
+    const z = (n:number)=>String(n).padStart(2,"0"); const _d = new Date();
+    const TODAY = +`${_d.getFullYear()}${z(_d.getMonth()+1)}${z(_d.getDate())}`;
+    let uMin = Infinity, uMax = -Infinity;
+    for (const sid of usedSids) { const c = calMap[sid]; if (c) { if(c.sd)uMin=Math.min(uMin,c.sd); if(c.ed)uMax=Math.max(uMax,c.ed); } }
+    const D = (isFinite(uMin)&&isFinite(uMax)) ? Math.min(Math.max(TODAY,uMin),uMax) : TODAY;
+    const noCal = cal.length === 0;
+    const trips: Record<string,{line:string;sentit:number;desti:string;mask:number}> = {};
+    for (const t of rawTrips) {
+      const c = calMap[t.sid];
+      const mask = noCal ? 127 : (c && (!c.sd || !c.ed || (D>=c.sd && D<=c.ed)) ? c.m : null);
+      if (mask == null) continue;
+      trips[t.id] = { line:t.line, sentit:t.sentit, desti:t.desti, mask };
     }
 
     // 5) stop_id → nom
