@@ -57,6 +57,18 @@
   .admin{background:#1b2030;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px;white-space:nowrap}
   .admin:hover{border-color:var(--accent);color:var(--accent)}
   .admin.on{background:var(--accent);color:#06201d;border-color:var(--accent);font-weight:700}
+  .hbtns{display:flex;gap:8px;flex:0 0 auto}
+  .abouttext{font-size:12.5px;color:var(--ink);line-height:1.55;margin:0 0 11px}
+  .abouttext a{color:var(--accent);text-decoration:none}
+  .abouttext a:hover{text-decoration:underline}
+  .aboutdet{margin:0 0 11px}
+  .aboutdet>summary{cursor:pointer;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;list-style:none;outline:none}
+  .aboutdet>summary::-webkit-details-marker{display:none}
+  .aboutdet>summary::before{content:'▸ ';color:var(--accent)}
+  .aboutdet[open]>summary::before{content:'▾ '}
+  .aboutlist{margin:9px 0 0;padding-left:0;list-style:none;font-size:12px;color:var(--muted);line-height:1.5}
+  .aboutlist li{margin:6px 0}
+  .aboutlist b{color:var(--ink);font-weight:600}
   .pwoverlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:50}
   .pwbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;width:280px;box-shadow:0 12px 44px rgba(0,0,0,.6)}
   .pwtitle{font-size:13px;font-weight:600;margin-bottom:10px}
@@ -83,9 +95,34 @@
       <h1>AudioMetro</h1>
       <div class="sub">Sonificació en temps real del metro de Barcelona.<span class="dev-only"> Mode admin actiu — menús de desenvolupament visibles.</span></div>
     </div>
-    <button id="adminBtn" class="admin">Admin</button>
+    <div class="hbtns">
+      <button id="aboutBtn" class="admin">Sobre</button>
+      <button id="adminBtn" class="admin">Admin</button>
+    </div>
   </div>
 </header>
+
+<div id="aboutOverlay" class="pwoverlay" style="display:none">
+  <div class="pwbox" style="width:360px;max-height:82vh;overflow:auto">
+    <div class="pwtitle">Sobre el projecte</div>
+    <p class="abouttext">AudioMetro és una sonificació en temps real de la xarxa de metro de Barcelona: cada arribada de tren es converteix en un impuls sonor —un gest tipus «neurona»— de manera que la ciutat sona com un organisme viu. Les dades provenen de TMB (iMetro en temps real i horaris GTFS).</p>
+    <details class="aboutdet">
+      <summary>Criteri sonor</summary>
+      <ul class="aboutlist">
+        <li><b>Nota → línia.</b> Cada línia té una nota fixa d'una escala pentatònica; el conjunt sempre sona consonant per moltes coincidències que hi hagi.</li>
+        <li><b>Panoràmica → posició.</b> Cada estació sona a esquerra o dreta segons la seva posició horitzontal real al mapa.</li>
+        <li><b>Harmònics → recorregut.</b> Lluny del seu terminal de destí el so és gairebé un sinus pur; a prop del destí, més ric (cap a un sawtooth). Depèn, doncs, de la direcció.</li>
+        <li><b>Detune → direcció.</b> Segons el sentit, la nota es desafina ±7 cents (7 centèsimes de semitò): un sentit baixa lleugeríssimament el to i l'altre el puja.</li>
+        <li><b>Brillantor i durada → freqüència de pas.</b> Com més sovint passa una línia, el so és més brillant i curt; com més espaiada, més fosc i llarg.</li>
+        <li><b>Registre i energia → centralitat.</b> Els intercanviadors sonen una o dues octaves més greus, amb més volum i una cua més llarga (més ressonants).</li>
+        <li><b>Reforç → coincidències.</b> Quan diverses arribades cauen alhora, s'afegeix un accent greu (una octava per sota) i puja el volum.</li>
+        <li><b>Ambient → densitat.</b> Com més arribades per minut, el so global es torna més brillant i amb menys reverberació; el pols del dia es nota sol.</li>
+      </ul>
+    </details>
+    <p class="abouttext">Un projecte d'<a href="https://andreuperello.cat" target="_blank" rel="noopener">Andreu Perelló</a>.</p>
+    <div class="pwbtns"><button class="btn save" id="aboutClose">Tanca</button></div>
+  </div>
+</div>
 
 <div class="wrap">
   <div>
@@ -589,6 +626,9 @@ document.getElementById('bg').onchange=e=>{if(bgImg)bgImg.setAttribute('display'
 document.getElementById('tps').onchange=e=>{useTPS=e.target.checked;layout();};
 document.getElementById('names').onchange=e=>{if(labelsG)labelsG.setAttribute('display',e.target.checked?'inline':'none');};
 document.getElementById('cal').onchange=e=>setEditMode(e.target.checked);
+document.getElementById('aboutBtn').onclick=()=>{document.getElementById('aboutOverlay').style.display='flex';};
+document.getElementById('aboutClose').onclick=()=>{document.getElementById('aboutOverlay').style.display='none';};
+document.getElementById('aboutOverlay').addEventListener('mousedown',e=>{if(e.target.id==='aboutOverlay')e.target.style.display='none';});
 document.getElementById('fsbtn').onclick=()=>{const st=document.querySelector('.stage');
   if(!document.fullscreenElement){(st.requestFullscreen||st.webkitRequestFullscreen||function(){}).call(st);}
   else{(document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document);}};
