@@ -585,13 +585,16 @@ function fireArrival(ev,t){
 }
 
 /* ---- loop (scheduler look-ahead + densitat) ---- */
-let running=false,density=0,fireTimes=[],epsShown=0;
+let running=false,density=0,fireTimes=[],epsShown=0,runStart=0;
 function step(){
   if(ready&&running){const a=Tone.now();
     while(SCHED.length&&SCHED[0].tAudio<a+0.1){const ev=SCHED.shift();if(ev.tAudio>=a-0.25)fireArrival(ev,Math.max(a,ev.tAudio));}
     const cut=performance.now()-60000;while(fireTimes.length&&fireTimes[0]<cut)fireTimes.shift();
-    density=Math.round(fireTimes.length*demoSpeed);            // ~arribades/min reals (impulsos l'últim minut)
-    epsShown=fireTimes.length*demoSpeed/60;                     // impulsos/s mitjanats sobre l'últim minut
+    // abans d'arribar al minut, extrapolem: comptem en la finestra observada (≥3 s) i escalem a 60 s
+    const obs=Math.min(60,Math.max(3,(performance.now()-runStart)/1000));
+    const perMin=fireTimes.length/obs*60;                       // arribades/min (extrapolat el primer minut)
+    density=Math.round(perMin*demoSpeed);                       // ~arribades/min
+    epsShown=perMin*demoSpeed/60;                               // impulsos/s, integrat/escalat a un minut
     const d01=clamp(density/120,0,1);
     if(mFilt)mFilt.frequency.rampTo(2000+8000*d01,0.5);
     if(reverb)reverb.wet.rampTo(0.34-0.16*d01,0.6);
@@ -683,7 +686,7 @@ function updateLineCounts(){ // nombre de trens reals per línia
       : `${L.seq.length} est · sense dades en temps real`;}
 }
 const power=document.getElementById('power');
-power.onclick=async()=>{if(!running){await Tone.start();if(!ready)master();running=true;power.textContent='■ Atura';power.classList.add('stop');poll();}
+power.onclick=async()=>{if(!running){await Tone.start();if(!ready)master();running=true;runStart=performance.now();fireTimes.length=0;power.textContent='■ Atura';power.classList.add('stop');poll();}
   else{running=false;power.textContent='▶ Activa l\'àudio';power.classList.remove('stop');}};
 const bind=(id,fn,fmt)=>{const e=document.getElementById(id);e.oninput=()=>{fn(parseFloat(e.value));if(fmt)document.getElementById(id+'V').textContent=fmt(e.value);};};
 bind('vol',v=>{if(mVol)mVol.gain.rampTo(Tone.dbToGain(v),0.1);},v=>`${v} dB`);
