@@ -829,14 +829,29 @@ requestAnimationFrame(step);
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 let deferredPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;});
-{const ib=document.getElementById('installBtn'); if(ib) ib.onclick=async()=>{
-  if(deferredPrompt){deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;return;}
-  if(window.matchMedia('(display-mode: standalone)').matches||navigator.standalone){alert('Ja tens AudioMetro instal·lat 🙂');return;}
-  const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
-  alert(ios
-    ? 'Per instal·lar a l\'iPhone/iPad: toca el botó Compartir i després «Afegir a la pantalla d\'inici».'
-    : 'Al menú del navegador (⋮), tria «Instal·la l\'aplicació» o «Afegeix a la pantalla d\'inici».');
-};}
+function installHelp(html){
+  const ov=document.createElement('div'); ov.className='pwoverlay';
+  ov.innerHTML='<div class="pwbox" style="width:330px"><div class="pwtitle">Instal·la AudioMetro</div>'
+    +'<div class="abouttext" style="margin:0 0 14px">'+html+'</div>'
+    +'<div class="pwbtns"><button class="btn save" data-x>Entesos</button></div></div>';
+  document.body.appendChild(ov);
+  const close=()=>ov.remove();
+  ov.querySelector('[data-x]').onclick=close;
+  ov.addEventListener('mousedown',e=>{if(e.target===ov)close();});
+}
+{const ib=document.getElementById('installBtn');
+ const ua=navigator.userAgent;
+ const isIOS=/iphone|ipad|ipod/i.test(ua)||(navigator.maxTouchPoints>1&&/Macintosh/.test(ua)); // iPad iOS13+ es fa passar per Mac
+ const isAndroid=/android/i.test(ua);
+ const isMobile=isIOS||isAndroid||/mobile|tablet|silk|kindle/i.test(ua);
+ const installed=()=>window.matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+ if(ib) ib.onclick=async()=>{
+   if(installed()){installHelp('Ja tens AudioMetro instal·lat al dispositiu 🙂');return;}
+   if(!isMobile){installHelp('AudioMetro s\'instal·la com a app des d\'un <b>mòbil o tauleta</b> (iOS o Android).<br><br>Obre <b>audiometro.andreuperello.cat</b> al teu dispositiu i torna a prémer aquest botó.');return;}
+   if(deferredPrompt){deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;return;}  // Android: popup natiu
+   if(isIOS){installHelp('A l\'iPhone/iPad cal fer-ho des de <b>Safari</b>:<br><br>1. Toca el botó <b>Compartir</b> (el quadrat amb una fletxa cap amunt, a la barra inferior).<br>2. Tria <b>«Afegir a la pantalla d\'inici»</b>.<br><br><span style="color:var(--muted)">iOS no permet fer aquest pas automàticament.</span>');return;}
+   installHelp('Obre el menú del navegador (⋮) i tria <b>«Instal·la l\'aplicació»</b> o <b>«Afegeix a la pantalla d\'inici»</b>.');
+ };}
 </script>
 </body>
 </html>
