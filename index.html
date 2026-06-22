@@ -123,10 +123,11 @@
   .abouttext a{color:var(--accent);text-decoration:none}
   .abouttext a:hover{text-decoration:underline}
   .aboutdet{margin:0 0 11px}
-  .aboutdet>summary{cursor:pointer;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;list-style:none;outline:none}
+  .aboutdet>summary{cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;list-style:none;outline:none;user-select:none}
+  .aboutdet>summary:hover{color:var(--accent)}
   .aboutdet>summary::-webkit-details-marker{display:none}
-  .aboutdet>summary::before{content:'▸ ';color:var(--accent)}
-  .aboutdet[open]>summary::before{content:'▾ '}
+  .aboutdet>summary::before{content:'▶';color:var(--accent);font-size:8px;transition:transform .15s ease}
+  .aboutdet[open]>summary::before{transform:rotate(90deg)}
   .aboutlist{margin:9px 0 0;padding-left:0;list-style:none;font-size:12px;color:var(--muted);line-height:1.5}
   .aboutlist li{margin:6px 0}
   .aboutlist b{color:var(--ink);font-weight:600}
@@ -847,7 +848,7 @@ function installHelp(html){
  const installed=()=>window.matchMedia('(display-mode: standalone)').matches||navigator.standalone;
  if(ib) ib.onclick=async()=>{
    if(installed()){installHelp('Ja tens AudioMetro instal·lat al dispositiu 🙂');return;}
-   if(!isMobile){installHelp('AudioMetro s\'instal·la com a app des d\'un <b>mòbil o tauleta</b> (iOS o Android).<br><br>Obre <b>audiometro.andreuperello.cat</b> al teu dispositiu i torna a prémer aquest botó.');return;}
+   if(!isMobile){installHelp('AudioMetro s\'instal·la com a app des d\'un <b>mòbil o tauleta</b> (iOS o Android).<br><br>Enfoca aquest QR amb la càmera del mòbil per obrir la web i, allà, prem «Instal·la com a app».<div style="text-align:center;margin-top:14px"><img src="qr.svg" alt="QR audiometro.andreuperello.cat" width="172" height="172" style="border-radius:10px"></div>');return;}
    if(deferredPrompt){deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;return;}  // Android: popup natiu
    if(isIOS){installHelp('A l\'iPhone/iPad cal fer-ho des de <b>Safari</b>:<br><br>1. Toca el botó <b>Compartir</b> (el quadrat amb una fletxa cap amunt, a la barra inferior).<br>2. Tria <b>«Afegir a la pantalla d\'inici»</b>.<br><br><span style="color:var(--muted)">iOS no permet fer aquest pas automàticament.</span>');return;}
    installHelp('Obre el menú del navegador (⋮) i tria <b>«Instal·la l\'aplicació»</b> o <b>«Afegeix a la pantalla d\'inici»</b>.');
