@@ -1,0 +1,17 @@
+{
+  "name": "AudioMetro · Sonificació del metro de Barcelona",
+  "short_name": "AudioMetro",
+  "description": "Sonificació en temps real de la xarxa de metro de Barcelona: cada arribada de tren és un impuls sonor.",
+  "lang": "ca",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#05060a",
+  "theme_color": "#05060a",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
